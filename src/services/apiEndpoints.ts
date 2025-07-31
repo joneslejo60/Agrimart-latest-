@@ -96,9 +96,9 @@ export const ORDER_ENDPOINTS = {
 // ===== USER PROFILE ENDPOINTS =====
 export const USER_ENDPOINTS = {
   // Profile management
-  GET_PROFILE: '/api/UserProfiles',
+  GET_PROFILE: (userId: string) => `/api/UserProfiles/${userId}`,
   GET_BY_ID: (id: string) => `/api/UserProfiles/${id}`,
-  UPDATE_PROFILE: '/api/UserProfiles',
+  UPDATE_PROFILE: (userId: string) => `/api/UserProfiles/${userId}`,
   DELETE_PROFILE: (id: string) => `/api/UserProfiles/${id}`,
   
   // User authentication status

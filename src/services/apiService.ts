@@ -648,14 +648,63 @@ export const userProfileApi = {
     return apiRequest<CreateUserProfileRequest, any>('/api/UserProfiles', 'POST', userProfile);
   },
   
-  update: (userId: string, userProfile: CreateUserProfileRequest) => {
-    // Add the userId to the request body instead of using it in the URL path
-    const profileWithId = {
-      ...userProfile,
-      userId: userId
-    };
-    // Use POST instead of PUT since the API doesn't support PUT
-    return apiRequest<CreateUserProfileRequest & {userId: string}, any>('/api/UserProfiles/update', 'POST', profileWithId);
+  update: async (userId: string, userProfile: CreateUserProfileRequest) => {
+    try {
+      // First, get the current user profile to preserve existing data
+      console.log('Fetching current profile for userId:', userId);
+      const currentProfileResponse = await apiRequest<null, any>(API_ENDPOINTS.USERS.GET_BY_ID(userId), 'GET');
+      
+      let fullProfile;
+      if (currentProfileResponse.success && currentProfileResponse.data) {
+        // Update existing profile with new data
+        fullProfile = {
+          ...currentProfileResponse.data,
+          // Update only the fields that are provided
+          name: userProfile.name,
+          email: userProfile.email,
+          phoneNumber: userProfile.phoneNumber,
+          // Convert password to passwordHash if password is provided and not the placeholder
+          ...(userProfile.password && userProfile.password !== 'UNCHANGED_PASSWORD' 
+            ? { passwordHash: userProfile.password }
+            : {}),
+          // Include profile picture if provided
+          ...(userProfile.profilePicture !== undefined 
+            ? { profilePicture: userProfile.profilePicture }
+            : {}),
+          // Ensure userId is set
+          userId: userId
+        };
+      } else {
+        // If we can't get current profile, create a minimal complete profile
+        console.warn('Could not fetch current profile, creating minimal profile');
+        fullProfile = {
+          userId: userId,
+          name: userProfile.name,
+          email: userProfile.email,
+          phoneNumber: userProfile.phoneNumber,
+          passwordHash: userProfile.password !== 'UNCHANGED_PASSWORD' ? userProfile.password : '',
+          role: 'Customer', // Default role
+          isActive: true, // Default to active
+          createdDate: new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+          ...(userProfile.profilePicture !== undefined 
+            ? { profilePicture: userProfile.profilePicture }
+            : {})
+        };
+      }
+      
+      console.log('Sending complete profile to API:', fullProfile);
+      
+      // Use PUT method with userId in URL path as per API specification
+      return apiRequest<any, any>(API_ENDPOINTS.USERS.UPDATE_PROFILE(userId), 'PUT', fullProfile);
+    } catch (error) {
+      console.error('Error in profile update:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update profile',
+        data: null
+      };
+    }
   },
   getCurrent: async (token: string) => {
     // Manually set the Authorization header and use fetch
