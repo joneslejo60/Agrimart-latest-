@@ -35,8 +35,8 @@ const AdminHomeScreen = () => {
   const scrollViewRef = useRef<ScrollView>(null);
   
   // State for order counts
-  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
-  const [newOrdersCount, setNewOrdersCount] = useState(0);
+  const [processingOrdersCount, setProcessingOrdersCount] = useState(0);
+  const [allOrdersCount, setAllOrdersCount] = useState(0);
   
   // Weather data state
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
@@ -74,8 +74,8 @@ const AdminHomeScreen = () => {
       
       // Update order counts from dashboard data
       if (data.orderStats) {
-        setPendingOrdersCount(data.orderStats.pendingOrders || 0);
-        setNewOrdersCount(data.orderStats.totalOrders || 0);
+        setProcessingOrdersCount(data.orderStats.processingOrders || 0);
+        setAllOrdersCount(data.orderStats.totalOrders || 0);
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -122,23 +122,25 @@ const AdminHomeScreen = () => {
     });
   };
 
-  const handlePendingOrdersPress = () => {
+  const handleProcessingOrdersPress = () => {
+    console.log('🎯 Navigating to AdminOrders with selectedTab: processing');
     navigation.navigate('AdminOrders', {
       userName,
       userPhone,
       profileImage,
       designation,
-      selectedTab: 'pending'
+      selectedTab: 'processing'
     });
   };
 
   const handleNewOrdersPress = () => {
+    console.log('🎯 Navigating to AdminOrders with selectedTab: all');
     navigation.navigate('AdminOrders', {
       userName,
       userPhone,
       profileImage,
       designation,
-      selectedTab: 'new'
+      selectedTab: 'all'
     });
   };
 
@@ -157,19 +159,14 @@ const AdminHomeScreen = () => {
   // Function to fetch order counts - replace with actual API call
   const fetchOrderCounts = async () => {
     try {
-      // TODO: Replace with actual API call
-      // const response = await apiService.orders.getCounts();
-      // setPendingOrdersCount(response.pendingCount);
-      // setNewOrdersCount(response.newCount);
-      
-      // Mock data for now
-      setPendingOrdersCount(5);
-      setNewOrdersCount(3);
+    
+      setProcessingOrdersCount(5);
+      setAllOrdersCount(8);
     } catch (error) {
       console.error('Error fetching order counts:', error);
       // Set default values on error
-      setPendingOrdersCount(0);
-      setNewOrdersCount(0);
+      setProcessingOrdersCount(0);
+      setAllOrdersCount(0);
     }
   };
 
@@ -309,7 +306,6 @@ const AdminHomeScreen = () => {
         </TouchableOpacity>
 
         {/* Banner Carousel */}
-        {/* Banner Carousel */}
         <View style={styles.swiperContainer}>
           <ScrollView
             ref={scrollViewRef}
@@ -352,13 +348,13 @@ const AdminHomeScreen = () => {
         {/* Order Management Cards */}
         <View style={styles.dashboardContainer}>
           <View style={styles.dashboardCardsTwo}>
-            <TouchableOpacity style={styles.pendingOrderCard} onPress={handlePendingOrdersPress}>
+            <TouchableOpacity style={styles.pendingOrderCard} onPress={handleProcessingOrdersPress}>
               <View style={styles.cardContent}>
                 <View style={styles.cardTextContainer}>
                   <Icon name="calendar" size={28} color="white" style={styles.cardIcon} />
-                  <Text style={styles.orderCount}>{pendingOrdersCount}</Text>
+                  <Text style={styles.orderCount}>{processingOrdersCount}</Text>
                 </View>
-                <Text style={styles.cardTitle}>{translate('Pending Orders')}</Text>
+                <Text style={styles.cardTitle}>{translate('Processing Orders')}</Text>
               </View>
             </TouchableOpacity>
 
@@ -366,9 +362,9 @@ const AdminHomeScreen = () => {
               <View style={styles.cardContent}>
                 <View style={styles.cardTextContainer}>
                   <Icon name="book" size={28} color="white" style={styles.cardIcon} />
-                  <Text style={styles.orderCount}>{newOrdersCount}</Text>
+                  <Text style={styles.orderCount}>{allOrdersCount}</Text>
                 </View>
-                <Text style={styles.cardTitle}>{translate('New Orders')}</Text>
+                <Text style={styles.cardTitle}>{translate('All Orders')}</Text>
               </View>
             </TouchableOpacity>
           </View>

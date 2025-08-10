@@ -101,7 +101,12 @@ export async function apiRequestNoRetry<T = any, R = any>(
             data: [] as R
           };
         }
-      } else {
+      } 
+      // Handle 404 errors for specific address lookups (expected when address is deleted)
+      else if (response.status === 404 && endpoint.includes('/api/Address/') && errorText.includes('not found')) {
+        console.info(`API info (${response.status}): Address not found - ${errorText} (This is normal for deleted addresses)`);
+      } 
+      else {
         console.error(`API error (${response.status}): ${errorText}`);
       }
       
@@ -251,7 +256,12 @@ export async function apiRequest<T = any, R = any>(
                 data: [] as R
               };
             }
-          } else {
+          } 
+          // Handle 404 errors for specific address lookups (expected when address is deleted)
+          else if (response.status === 404 && endpoint.includes('/api/Address/') && errorText.includes('not found')) {
+            console.info(`API info (${response.status}): Address not found - ${errorText} (This is normal for deleted addresses)`);
+          } 
+          else {
             console.error(`API error (${response.status}): ${errorText}`);
           }
           let errorMessage = `API request failed with status ${response.status}`;

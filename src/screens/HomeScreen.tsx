@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, StatusBar, TouchableOpacity, Image, ScrollView, Dimensions, Platform, ActivityIndicator, Modal, Linking, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import apiService, { Address, Category } from '../services/apiService';
 import { API_BASE_URL } from '../services/apiConfig';
@@ -69,61 +70,227 @@ const HomeScreen = () => {
     }
   }, [userPhone]);
 
-  // Fetch addresses when the component gains focus or when formattedUserPhone changes
+  // Function to refresh addresses - can be called manually
+  const refreshAddresses = React.useCallback(async () => {
+    console.log('🔄 ==========================================');
+    console.log('🔄 REFRESHING ADDRESSES - START');
+    console.log('🔄 ==========================================');
+    setLoadingAddress(true);
+    try {
+      // Get the real user ID
+      let user = await userService.getUser();
+      if (!user || !user.id) {
+        user = await fetchCurrentUserFromApi();
+      }
+      const userId = user?.id;
+      if (!userId) {
+        console.log('🏠 No user ID found, cannot fetch addresses');
+        setAddresses([]);
+        setDefaultAddress(null);
+        setLoadingAddress(false);
+        return;
+      }
+      
+      console.log('🏠 Fetching addresses for user:', userId);
+      const response = await apiService.address.getUserAddresses(userId);
+      
+      if (response.success && response.data) {
+        // Map the API response to the format expected by the UI
+        const mappedAddresses = response.data.map((addr: any) => ({
+          ...addr,
+          // Ensure ID fields are properly set
+          id: addr.id || addr.addressId || addr.Id,
+          addressId: addr.addressId || addr.id || addr.Id,
+          // Ensure UI-specific fields are set
+          type: addr.type || addr.addressLine2 || 'Home',
+          address: addr.address || addr.addressLine1 || addr.street || '',
+          city: addr.city || addr.cityName || '',
+          state: addr.state || addr.stateName || '',
+          pincode: addr.pincode || addr.zipCode || addr.postalCode || '',
+          phone: addr.phone || addr.phoneNumber || (user ? user.phoneNumber : ''),
+          isDefault: addr.isDefault || addr.isDefaultShipping || false,
+          // Keep original fields for debugging
+          _original: addr
+        }));
+        
+        setAddresses(mappedAddresses);
+        
+        // Find the default address with enhanced debugging
+        console.log('🏠 All addresses:', mappedAddresses.map(addr => ({ 
+          id: addr.id, 
+          addressId: addr.addressId,
+          address: addr.address, 
+          isDefault: addr.isDefault,
+          isDefaultShipping: addr.isDefaultShipping,
+          _originalId: addr._original?.id,
+          _originalAddressId: addr._original?.addressId
+        })));
+        
+        // Debug: Show first address in full detail
+        if (mappedAddresses.length > 0) {
+          console.log('🔍 FULL FIRST ADDRESS:', JSON.stringify(mappedAddresses[0], null, 2));
+          console.log('🔍 ORIGINAL FIRST ADDRESS:', JSON.stringify(mappedAddresses[0]._original, null, 2));
+        }
+        
+        // PRIORITY 1: Check if user has manually selected a default address
+        let defaultAddr: any = null;
+        try {
+          const storedDefaultId = await AsyncStorage.getItem('defaultAddressId');
+          if (storedDefaultId) {
+            console.log('🎯 Looking for user-selected default address ID:', storedDefaultId);
+            defaultAddr = mappedAddresses.find((addr: any) => 
+              String(addr.addressId) === storedDefaultId || 
+              String(addr.id) === storedDefaultId
+            );
+            if (defaultAddr) {
+              console.log('🎯 ✅ Found user-selected default address:', {
+                id: defaultAddr.addressId,
+                address: defaultAddr.address
+              });
+            } else {
+              console.log('🎯 ❌ User-selected address not found, falling back to API flags');
+            }
+          }
+        } catch (error) {
+          console.log('🎯 Error reading stored default address:', error);
+        }
+        
+        // PRIORITY 2: If no stored preference, use API default flags
+        if (!defaultAddr) {
+          console.log('🔍 Looking for API default address in:', mappedAddresses.map((addr: any) => ({
+            id: addr.id,
+            address: addr.address,
+            isDefault: addr.isDefault,
+            isDefaultShipping: addr.isDefaultShipping,
+            _isDefaultType: typeof addr.isDefault,
+            _isDefaultShippingType: typeof addr.isDefaultShipping
+          })));
+          
+          defaultAddr = mappedAddresses.find((addr: any) => 
+            addr.isDefault === true || 
+            addr.isDefaultShipping === true ||
+            String(addr.isDefault) === 'true' ||
+            String(addr.isDefaultShipping) === 'true'
+          );
+        }
+        
+        // If still no default found, check for other possible indicators
+        if (!defaultAddr) {
+          console.log('🔍 No default found with standard fields, checking alternatives...');
+          
+          // Look for addresses with any truthy default value
+          defaultAddr = mappedAddresses.find((addr: any) => 
+            addr.isDefault || 
+            addr.isDefaultShipping ||
+            addr.default ||
+            addr.defaultAddress ||
+            addr.isDefaultAddress
+          );
+          
+          console.log('🔍 Alternative search result:', defaultAddr ? `Found: ${defaultAddr.address}` : 'None found');
+        }
+        
+        // WORKAROUND: If still no default found, use the most recently created/updated address
+        // This handles API inconsistency where the default flag isn't properly updated
+        if (!defaultAddr && mappedAddresses.length > 0) {
+          console.log('🔧 WORKAROUND: No default flags found, using most recent address...');
+          
+          // Sort by createdDate (most recent first) to find the address that was just updated
+          const sortedByDate = [...mappedAddresses].sort((a: any, b: any) => {
+            const dateA = new Date(a.createdDate || a.updatedDate || 0);
+            const dateB = new Date(b.createdDate || b.updatedDate || 0);
+            return dateB.getTime() - dateA.getTime();
+          });
+          
+          defaultAddr = sortedByDate[0];
+          console.log('🔧 Selected most recent address:', {
+            id: defaultAddr.addressId,
+            address: defaultAddr.address,
+            createdDate: defaultAddr.createdDate
+          });
+        }
+        
+        // If multiple addresses are marked as default, get the most recently updated one
+        if (!defaultAddr && mappedAddresses.length > 0) {
+          const defaultAddresses = mappedAddresses.filter((addr: any) => 
+            addr.isDefault === true || 
+            addr.isDefaultShipping === true ||
+            String(addr.isDefault) === 'true' ||
+            String(addr.isDefaultShipping) === 'true' ||
+            addr.isDefault || 
+            addr.isDefaultShipping ||
+            addr.default ||
+            addr.defaultAddress ||
+            addr.isDefaultAddress
+          );
+          
+          if (defaultAddresses.length > 1) {
+            // Sort by updatedDate or createdDate (most recent first)
+            defaultAddr = defaultAddresses.sort((a: any, b: any) => {
+              const dateA = new Date(a.updatedDate || a.createdDate || 0);
+              const dateB = new Date(b.updatedDate || b.createdDate || 0);
+              return dateB.getTime() - dateA.getTime();
+            })[0];
+            console.log('🏠 Multiple default addresses found, using most recent:', defaultAddr?.address);
+          } else if (defaultAddresses.length === 1) {
+            defaultAddr = defaultAddresses[0];
+            console.log('🏠 Found single default address:', defaultAddr?.address);
+          }
+        }
+        
+        if (defaultAddr) {
+          console.log('🏠 ✅ Setting default address:', { 
+            id: defaultAddr.id, 
+            addressId: defaultAddr.addressId,
+            address: defaultAddr.address, 
+            city: defaultAddr.city,
+            state: defaultAddr.state,
+            pincode: defaultAddr.pincode,
+            isDefault: defaultAddr.isDefault,
+            isDefaultShipping: defaultAddr.isDefaultShipping,
+            isDefaultBilling: defaultAddr.isDefaultBilling
+          });
+          console.log('🏠 ✅ FULL DEFAULT ADDRESS:', JSON.stringify(defaultAddr, null, 2));
+          setDefaultAddress(defaultAddr);
+        } else if (mappedAddresses.length > 0) {
+          // If no default is set but we have addresses, use the first one
+          console.log('🏠 ⚠️ No default address found, using first address:', {
+            id: mappedAddresses[0].id,
+            address: mappedAddresses[0].address,
+            isDefault: mappedAddresses[0].isDefault
+          });
+          setDefaultAddress(mappedAddresses[0]);
+        } else {
+          console.log('🏠 ❌ No addresses found');
+          setDefaultAddress(null);
+        }
+      } else {
+        console.log('🏠 No address data in API response');
+        setAddresses([]);
+        setDefaultAddress(null);
+      }
+    } catch (err) {
+      console.error('🏠 Error fetching addresses:', err);
+      setAddresses([]);
+      setDefaultAddress(null);
+    } finally {
+      setLoadingAddress(false);
+      console.log('🔄 ==========================================');
+      console.log('🔄 REFRESHING ADDRESSES - END');
+      console.log('🔄 ==========================================');
+    }
+  }, []);
+
+  // Fetch addresses when the component gains focus
   useFocusEffect(
     React.useCallback(() => {
-      const fetchAddresses = async () => {
-        setLoadingAddress(true);
-        try {
-          // Get the real user ID
-          let user = await userService.getUser();
-          if (!user || !user.id) {
-            user = await fetchCurrentUserFromApi();
-          }
-          const userId = user?.id;
-          if (!userId) {
-            setAddresses([]);
-            setDefaultAddress(null);
-            setLoadingAddress(false);
-            return;
-          }
-          const response = await apiService.address.getUserAddresses(userId);
-          if (response.success && response.data) {
-            // Map the API response to the format expected by the UI
-            const mappedAddresses = response.data.map(addr => ({
-              ...addr,
-              // Ensure UI-specific fields are set
-              type: addr.type || addr.addressLine2 || 'Home',
-              address: addr.address || addr.addressLine1 || '',
-              pincode: addr.pincode || addr.zipCode || '',
-              phone: addr.phone || addr.phoneNumber || (user ? user.phoneNumber : ''),
-              isDefault: addr.isDefault || addr.isDefaultShipping || false
-            }));
-            
-            setAddresses(mappedAddresses);
-            
-            // Find the default address
-            const defaultAddr = mappedAddresses.find(addr => addr.isDefault);
-            if (defaultAddr) {
-              setDefaultAddress(defaultAddr);
-            } else if (mappedAddresses.length > 0) {
-              // If no default is set but we have addresses, use the first one
-              setDefaultAddress(mappedAddresses[0]);
-            }
-          } else {
-            setAddresses([]);
-            setDefaultAddress(null);
-          }
-        } catch (err) {
-          console.error('Error fetching addresses:', err);
-          setAddresses([]);
-          setDefaultAddress(null);
-        } finally {
-          setLoadingAddress(false);
-        }
-      };
+      console.log('🔄 HomeScreen gained focus - refreshing addresses');
+      // Use setTimeout to ensure the screen is fully focused before refreshing
+      const timer = setTimeout(() => {
+        refreshAddresses();
+      }, 100);
       
-      fetchAddresses();
+      return () => clearTimeout(timer);
     }, [])
   );
   
@@ -136,23 +303,14 @@ const HomeScreen = () => {
           const response = await apiService.categories.getAll();
           
           if (response.success && response.data) {
-            // Filter categories for Agri Inputs (assuming they have specific identifiers)
-            // This is a placeholder logic - adjust based on your actual category structure
+            // Filter categories for Agri Inputs using correct category ID
             const agriInputs = response.data.filter(category => 
-              category.name.toLowerCase().includes('agri') || 
-              category.name.toLowerCase().includes('farm') ||
-              category.name.toLowerCase().includes('seed') ||
-              category.name.toLowerCase().includes('fertilizer') ||
-              category.parentCategoryId === 1 // Assuming parent category ID 1 is for Agri Inputs
+              category.id === 2 // Correct ID for "agri input" category
             );
             
-            // Filter categories for Groceries
+            // Filter categories for Groceries using correct category ID
             const groceries = response.data.filter(category => 
-              category.name.toLowerCase().includes('grocer') || 
-              category.name.toLowerCase().includes('food') ||
-              category.name.toLowerCase().includes('vegetable') ||
-              category.name.toLowerCase().includes('fruit') ||
-              category.parentCategoryId === 2 // Assuming parent category ID 2 is for Groceries
+              category.id === 3 // Correct ID for "Groceries" category
             );
             
             setAgriInputCategories(agriInputs);
@@ -277,6 +435,7 @@ const HomeScreen = () => {
   };
 
   const handleAddressPress = () => {
+    console.log('🏠 Navigating to MyAddress screen');
     navigation.navigate('MyAddress', { userName, userPhone });
   };
 
@@ -384,12 +543,24 @@ const HomeScreen = () => {
           />
         </View>
 
-        <TouchableOpacity style={styles.addressContainer} onPress={handleAddressPress}>
+        <TouchableOpacity 
+          style={styles.addressContainer} 
+          onPress={handleAddressPress}
+          onLongPress={() => {
+            console.log('🔄 Manual refresh triggered');
+            refreshAddresses();
+          }}
+        >
           {loadingAddress ? (
             <ActivityIndicator size="small" color="white" style={{ marginRight: 10 }} />
           ) : defaultAddress ? (
             <Text style={styles.addressText} numberOfLines={2}>
-              {defaultAddress.address}, {defaultAddress.pincode}
+              {[
+                defaultAddress?.address,
+                defaultAddress?.city,
+                defaultAddress?.state,
+                defaultAddress?.pincode
+              ].filter(Boolean).join(', ')}
             </Text>
           ) : (
             <Text style={styles.addressText} numberOfLines={2}>

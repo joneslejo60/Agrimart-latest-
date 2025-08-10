@@ -1,6 +1,6 @@
 // frontend/src/services/apiConfig.ts
 
-export const API_BASE_URL = 'https://2ced68f4450d.ngrok-free.app'; // Updated to use new ngrok tunnel
+export const API_BASE_URL = 'https://c8239503ad89.ngrok-free.app'; // Updated to use new ngrok tunnel
 
 // API request timeout in milliseconds
 export const TIMEOUT_MS = 60000; // Increased to 60 seconds for ngrok connections

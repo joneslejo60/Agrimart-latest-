@@ -43,73 +43,13 @@ const AdminProfileScreen = () => {
   const { userName = '', userPhone = '', profileImage, designation = 'Manager' } = route.params || {};
 
   const [loading, setLoading] = useState(false);
-  const [profileData, setProfileData] = useState({
-    userName: userName,
-    userPhone: userPhone,
-    profileImage: profileImage,
-    designation: designation
+  // Static admin data - no API calls
+  const [profileData] = useState({
+    userName: 'ADMIN',
+    userPhone: '',
+    profileImage: undefined as string | undefined,
+    designation: 'Manager'
   });
-
-  // AsyncStorage functions
-  const loadAdminProfile = async () => {
-    try {
-      const data = await AsyncStorage.getItem('adminProfile');
-      if (data) {
-        const savedProfile = JSON.parse(data);
-        setProfileData(savedProfile);
-        return savedProfile;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error loading admin profile:', error);
-      return null;
-    }
-  };
-
-  // Load profile data on component mount
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        // Get user from local storage (userService)
-        const user = await userService.getUser();
-        console.log('🔍 AdminProfile - Current user from storage:', user);
-        if (user && user.id) {
-          console.log('🔍 AdminProfile - Looking for userId:', user.id);
-          const response = await adminUserApi.getUserById(user.id);
-          console.log('🔍 AdminProfile - API response:', response);
-          if (response && response.success && response.data) {
-            const userData = response.data as AdminUserProfile;
-            console.log('🔍 AdminProfile - Found user data:', userData);
-            
-            // Use local storage data as primary source (seems to be correct)
-            // Only use API data for additional fields like profileImage
-            const newProfileData = {
-              userName: user.name || userData.name || '',
-              userPhone: user.phoneNumber || userData.phoneNumber || '',
-              profileImage: userData.profilePicture,
-              designation: 'Manager',
-            };
-            console.log('🔍 AdminProfile - Setting profile data:', newProfileData);
-            setProfileData(newProfileData);
-            return;
-          } else {
-            console.log('🔍 AdminProfile - API call failed or no data');
-          }
-        }
-        // fallback to AsyncStorage if backend fetch fails
-        await loadAdminProfile();
-      } catch (error) {
-        console.error('Error fetching admin profile:', error);
-        await loadAdminProfile();
-      }
-    };
-    fetchProfile();
-  }, []);
-
-  // Debug current profile data
-  useEffect(() => {
-    console.log('🔍 AdminProfile - Current profileData state:', profileData);
-  }, [profileData]);
 
   StatusBar.setBarStyle('light-content');
   StatusBar.setBackgroundColor('#09A84E');
@@ -225,20 +165,8 @@ const AdminProfileScreen = () => {
         <View style={styles.profileContainer}>
           <View style={styles.profileImageContainer}>
             <Image source={getImageSource()} style={styles.profileImage} />
-            <TouchableOpacity style={styles.imageEditButton}>
-              <Icon name="camera-alt" size={20} color="black" />
-            </TouchableOpacity>
           </View>
-          <View style={styles.profileDetails}>
-            <Text style={styles.name}>{profileData.userName}</Text>
-            <Text style={styles.phone}>{profileData.userPhone}</Text>
-            <TouchableOpacity 
-              style={styles.editButton} 
-              onPress={handleEditProfile}
-            >
-              <Text style={styles.editButtonText}>{translate('Edit Profile')}</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.adminLabel}>Admin</Text>
         </View>
 
         <View style={styles.optionsContainer}>
@@ -335,13 +263,13 @@ const styles = StyleSheet.create({
   },
 
   profileContainer: { 
-    flexDirection: 'row', 
     alignItems: 'center', 
     paddingHorizontal: 22,
-    marginTop: 27, // Reduced from 115 since we now have paddingTop on scrollContainer
+    marginTop: 27,
   },
   profileImageContainer: { 
     position: 'relative',
+    marginBottom: 8,
   },
   profileImage: { 
     width: 120, 
@@ -362,36 +290,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 1,
-  },
-
-  profileDetails: { 
-    marginLeft: 31, 
-    flex: 1,
-    alignItems: 'flex-start',
-  },
-  name: { 
-    fontSize: 15, 
-    fontWeight: '600',
-    fontFamily: 'Montserrat',
-    width: 'auto',
-    height: 18,
-    lineHeight: 15,
-    letterSpacing: 0,
-    textAlign: 'left',
-    color: '#000000',
-  },
-  phone: { 
-    fontSize: 13, 
-    color: '#000000',
-    marginTop: 10,
-    marginBottom: 5,
-    fontFamily: 'Montserrat',
-    fontWeight: '400',
-    width: 'auto',
-    height: 16,
-    lineHeight: 13,
-    letterSpacing: 0,
-    textAlign: 'left',
   },
 
 
@@ -481,6 +379,13 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#09A84E',
     fontWeight: 'bold',
+  },
+  adminLabel: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#09A84E',
+    marginTop: 4,
+    fontFamily: 'Montserrat',
   },
 });
 

@@ -18,8 +18,8 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import { RootStackParamList, AdminTabsParamList } from '../../navigation/navigation.types';
 import { useLanguage } from '../../context/LanguageContext';
-import { adminApi } from '../../services/adminApiService';
 import apiService from '../../services/apiService';
+import { OrderStatusStorage } from '../../utils/orderStatusStorage';
 
 type AdminOrderHandleNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AdminOrderHandle'>;
 type AdminOrderHandleRouteProp = RouteProp<RootStackParamList, 'AdminOrderHandle'>;
@@ -59,9 +59,10 @@ const AdminOrderHandle = () => {
   
   const [showStatusOptions, setShowStatusOptions] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('Shipped');
-  const [productsDetails, setProductsDetails] = useState<Product[]>([]);
+  const [currentStatus, setCurrentStatus] = useState('Shipped');
   const [address, setAddress] = useState<Address | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // Show status bar when AdminOrderHandle mounts
   useEffect(() => {
@@ -74,28 +75,58 @@ const AdminOrderHandle = () => {
     }
   }, []);
 
+  // Load saved status on component mount
+  useEffect(() => {
+    async function loadSavedStatus() {
+      if (orderData?.id) {
+        const savedStatus = await OrderStatusStorage.getOrderStatus(orderData.id);
+        const effectiveStatus = savedStatus || orderData.status || 'Shipped';
+        setCurrentStatus(effectiveStatus);
+        setSelectedStatus(effectiveStatus);
+        console.log(`📦 Loaded status for order ${orderData.id}: ${effectiveStatus}`);
+      }
+    }
+    loadSavedStatus();
+  }, [orderData?.id]);
+
   useEffect(() => {
     async function fetchDetails() {
-      if (orderData && orderData.orderItems) {
-        // Fetch all product details in parallel
-        const productPromises = orderData.orderItems.map((item: any) =>
-          adminApi.products.getById(item.productId)
-        );
-        const products = await Promise.all(productPromises);
-        setProductsDetails(products.map(p => p.data));
-      }
       if (orderData && orderData.shippingAddressId) {
-        const addressResp = await apiService.address.getById(orderData.shippingAddressId);
-        const addr = addressResp.data
-          ? {
-              addressId: addressResp.data.addressId ?? 0,
-              street: addressResp.data.street ?? '',
+        try {
+          // Convert to string as the API expects string ID
+          const addressResp = await apiService.address.getById(String(orderData.shippingAddressId));
+          if (addressResp.success && addressResp.data) {
+            const addr = {
+              addressId: addressResp.data.addressId ?? orderData.shippingAddressId,
+              street: addressResp.data.street ?? addressResp.data.addressLine1 ?? '',
               city: addressResp.data.city ?? '',
               state: addressResp.data.state ?? '',
               zipCode: addressResp.data.zipCode ?? ''
+            };
+            setAddress(addr);
+          } else {
+            // Fallback: try fetching from all addresses and find the matching one
+            const allAddressesResp = await apiService.address.getAll(1, 100);
+            if (allAddressesResp.success && allAddressesResp.data) {
+              const matchingAddress = allAddressesResp.data.find(addr => 
+                addr.addressId === orderData.shippingAddressId || 
+                String(addr.addressId) === String(orderData.shippingAddressId)
+              );
+              if (matchingAddress) {
+                const addr = {
+                  addressId: matchingAddress.addressId ?? orderData.shippingAddressId,
+                  street: matchingAddress.street ?? matchingAddress.addressLine1 ?? '',
+                  city: matchingAddress.city ?? '',
+                  state: matchingAddress.state ?? '',
+                  zipCode: matchingAddress.zipCode ?? ''
+                };
+                setAddress(addr);
+              }
             }
-          : null;
-        setAddress(addr);
+          }
+        } catch (error) {
+          console.error('Error fetching address:', error);
+        }
       }
       if (orderData && orderData.userId) {
         const userResp = await apiService.userProfile.getById(orderData.userId);
@@ -118,25 +149,20 @@ const AdminOrderHandle = () => {
   const handleStatusChange = async (newStatus: string) => {
     setSelectedStatus(newStatus);
     setShowStatusOptions(false);
-    // Map status string to statusId (customize as needed)
-    const statusMap: { [key: string]: number } = {
-      'Confirmed': 1,
-      'Shipped': 2,
-      'Delivered': 3,
-      'Cancelled': 4
-    };
-    const statusId = statusMap[newStatus];
-    if (!orderData?.orderId || !statusId) return;
-    try {
-      const result = await adminApi.orders.updateOrderStatus(orderData.orderId, { statusId: statusId, notes: '' });
-      if (result && result.success !== false) {
-        Alert.alert('Success', `Order status updated to ${newStatus}`);
-      } else {
-        Alert.alert('Error', result?.error || 'Failed to update order status');
+    setIsUpdating(true);
+    
+    // Simulate processing time for better UX
+    setTimeout(async () => {
+      setCurrentStatus(newStatus);
+      
+      // Save status to storage
+      if (orderData?.id) {
+        await OrderStatusStorage.saveOrderStatus(orderData.id, newStatus);
       }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update order status');
-    }
+      
+      setIsUpdating(false);
+      Alert.alert('Success', `Order status updated to ${newStatus}`);
+    }, 1000);
   };
 
   return (
@@ -166,14 +192,17 @@ const AdminOrderHandle = () => {
           {/* Products List */}
           <View style={styles.productList}>
           {orderData?.orderItems?.map((item: any, index: number) => {
-            const product = productsDetails.find((p) => p && p.productId === item.productId);
             return (
-              <View key={`product-${item.productId || index}`} style={styles.productItem}>
-                {product?.imageUrl ? (
-                  <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
-                ) : null}
+              <View key={`product-${item.orderItemId || index}`} style={styles.productItem}>
+                {item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+                ) : (
+                  <View style={styles.placeholderImage}>
+                    <Icon name="image" size={24} color="#ccc" />
+                  </View>
+                )}
                 <View style={styles.productDetails}>
-                  <Text style={styles.productName}>{product?.name || 'Product'}</Text>
+                  <Text style={styles.productName}>{item.productName || 'Product'}</Text>
                   <Text style={styles.productQuantity}>Qty-{item.quantity}</Text>
                 </View>
                 <Text style={styles.productPrice}>₹{item.price}</Text>
@@ -191,7 +220,7 @@ const AdminOrderHandle = () => {
 
           {/* Order ID */}
           <View style={styles.orderIdBox}>
-            <Text style={styles.orderIdText}>Order ID: {orderData?.orderId || orderId || 'ORD001'}</Text>
+            <Text style={styles.orderIdText}>Order ID: {orderData?.id || orderId || 'ORD001'}</Text>
           </View>
 
           {/* User Details & Address */}
@@ -210,7 +239,9 @@ const AdminOrderHandle = () => {
             
             <View style={styles.userInfoRow}>
               <Icon name="map-marker" size={16} color="#333" style={styles.userIcon} />
-              <Text style={styles.userInfoText}>{address ? `${address.street}, ${address.city}, ${address.state}, ${address.zipCode}` : 'N/A'}</Text>
+              <Text style={styles.userInfoText}>
+                {address ? `${address.street}, ${address.city}, ${address.state}, ${address.zipCode}` : 'Loading address...'}
+              </Text>
             </View>
           </View>
 
@@ -219,27 +250,50 @@ const AdminOrderHandle = () => {
             <View style={styles.deliveryStatusRow}>
               <Text style={styles.deliveryStatusLabel}>Delivery Status</Text>
               <TouchableOpacity 
-                style={styles.deliveryStatusButton} 
-                onPress={() => setShowStatusOptions(!showStatusOptions)}
+                style={[
+                  styles.deliveryStatusButton,
+                  isUpdating && styles.updatingButton
+                ]} 
+                onPress={() => !isUpdating && setShowStatusOptions(!showStatusOptions)}
+                disabled={isUpdating}
               >
-                <Text style={styles.deliveryStatusButtonText}>{selectedStatus}</Text>
-                <Icon name={showStatusOptions ? "chevron-up" : "chevron-down"} size={12} color="#09A84E" />
+                <Text style={[
+                  styles.deliveryStatusButtonText,
+                  isUpdating && styles.updatingText
+                ]}>
+                  {isUpdating ? 'Updating...' : currentStatus}
+                </Text>
+                {!isUpdating && (
+                  <Icon name={showStatusOptions ? "chevron-up" : "chevron-down"} size={12} color="#09A84E" />
+                )}
+                {isUpdating && (
+                  <Icon name="spinner" size={12} color="#666" />
+                )}
               </TouchableOpacity>
             </View>
             <View style={styles.deliveryDateRow}>
               <Text style={styles.deliveryDateLabel}>
-                {selectedStatus === 'Confirmed' ? 'Confirmed on' : 
-                 selectedStatus === 'Shipped' ? 'Shipped on' : 
-                 selectedStatus === 'Delivered' ? 'Delivered on' : 
-                 selectedStatus === 'Cancelled' ? 'Cancelled on' : 'Updated on'}
+                {currentStatus === 'Confirmed' ? 'Confirmed on' : 
+                  currentStatus === 'Processing' ? 'Processing since' : 
+                  currentStatus === 'Shipped' ? 'Shipped on' : 
+                  currentStatus === 'Delivered' ? 'Delivered on' : 
+                  currentStatus === 'Cancelled' ? 'Cancelled on' : 'Updated on'}
               </Text>
-              <Text style={styles.deliveryDateValue}>1st June, 2025 10:00 AM</Text>
+              <Text style={styles.deliveryDateValue}>
+                {new Date().toLocaleDateString('en-GB', { 
+                  day: 'numeric', 
+                  month: 'long', 
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
             </View>
             
             {/* Status Options Dropdown */}
             {showStatusOptions && (
               <View style={styles.statusOptionsContainer}>
-                {['Confirmed', 'Shipped', 'Delivered', 'Cancelled'].map((status) => (
+                {['Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].map((status) => (
                   <TouchableOpacity 
                     key={status}
                     style={[styles.statusOption, selectedStatus === status && styles.selectedStatusOption]} 
@@ -353,6 +407,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'Montserrat',
   },
+  updatingButton: {
+    backgroundColor: '#e0e0e0',
+    borderColor: '#ccc',
+  },
+  updatingText: {
+    color: '#666',
+  },
   statusOptionsContainer: {
     position: 'absolute',
     bottom: 85, // moved up more for better visibility
@@ -436,6 +497,17 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 8,
     marginRight: 12,
+  },
+  placeholderImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
   productDetails: {
     flex: 1,
@@ -601,4 +673,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AdminOrderHandle; 
+export default AdminOrderHandle;

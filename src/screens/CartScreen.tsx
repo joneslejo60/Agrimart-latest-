@@ -1,37 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StatusBar, StyleSheet, TouchableOpacity, ScrollView, Image,ActivityIndicator, Alert } from 'react-native';
-import { useRoute, useNavigation, RouteProp, useNavigationState } from '@react-navigation/native';
+import { useRoute, useNavigation, RouteProp, useNavigationState, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { HomeTabsParamList, RootStackParamList } from '../navigation/navigation.types';
-import { getCartItems, saveCartItems, CartItem } from '../utils/cartStorage';
+import { getCartItems, CartItem } from '../utils/cartStorage';
 import { cartApi, orderApi, OrderCreationResponse } from '../services/apiService';
 import { ApiResponse } from '../services/apiConfig';
 import { saveOrder, Order } from '../utils/orderStorage';
 import { getUser, fetchCurrentUserFromApi } from '../services/userService';
 import { useLanguage } from '../context/LanguageContext';
+import { useCart } from '../context/CartContext';
 import { debugAuth, testCartApi } from '../utils/authDebugger';
 import DebugPanel from '../components/DebugPanel';
+import { ORDER_STATUS } from '../constants/orderStatus';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type CartScreenRouteProp = RouteProp<HomeTabsParamList, 'Cart'>;
 type CartScreenNavigationProp = any;
 
 const CartScreen = () => {
   const { translate } = useLanguage();
+  const { cartItems, setCartItems, refreshCart, updateQuantity: updateCartQuantity, removeItem, clearCart } = useCart();
   const route = useRoute<CartScreenRouteProp>();
   const navigation = useNavigation<CartScreenNavigationProp>();
   const { userName, userPhone: routeUserPhone, selectedAddress, cartItems: routeCartItems } = route.params || {};
-
-  // Initialize cart items from route params, will be replaced with storage data
-  const [cartItems, setCartItems] = useState(routeCartItems || []);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatingItems, setUpdatingItems] = useState<{[key: string]: boolean}>({});
   
   // Add state for userPhone
   const [userPhone, setUserPhone] = useState('');
+  
+  // Address state - moved here to be available before useEffect
+  const [address, setAddress] = useState(selectedAddress);
+  
+  // Order success modal state
+  const [showOrderSuccess, setShowOrderSuccess] = useState(false);
+  
+  // Helper functions for address persistence
+  const saveSelectedAddressToStorage = async (address: any) => {
+    try {
+      if (address) {
+        await AsyncStorage.setItem('selectedCartAddress', JSON.stringify(address));
+        console.log('Address saved to storage');
+      }
+    } catch (error) {
+      console.error('Error saving address to storage:', error);
+    }
+  };
+
+  const loadSelectedAddressFromStorage = async () => {
+    try {
+      const savedAddress = await AsyncStorage.getItem('selectedCartAddress');
+      if (savedAddress) {
+        const parsedAddress = JSON.parse(savedAddress);
+        console.log('Address loaded from storage');
+        return parsedAddress;
+      }
+    } catch (error) {
+      console.error('Error loading address from storage:', error);
+    }
+    return null;
+  };
   
   // Load user ID and cart items from storage when component mounts
   useEffect(() => {
@@ -44,11 +77,16 @@ const CartScreen = () => {
         await debugAuth();
         
         // First, quickly load cart items from local storage to show something immediately
-        const storedCartItems = await getCartItems();
-        if (storedCartItems && storedCartItems.length > 0) {
-          setCartItems(storedCartItems);
-          console.log('Loaded cart items from local storage:', storedCartItems.length);
-          // Keep loading true until we check the API
+        await refreshCart();
+        console.log('Refreshed cart items from local storage');
+        
+        // Load saved address from storage if no address is selected
+        if (!address) {
+          const savedAddress = await loadSelectedAddressFromStorage();
+          if (savedAddress) {
+            setAddress(savedAddress);
+            console.log('Loaded saved address from storage');
+          }
         }
         
         // Always fetch user data from /api/Authentication/me for the real phone number
@@ -68,6 +106,12 @@ const CartScreen = () => {
             
             if (response.success && response.data) {
               console.log('Cart data fetched from API:', response.data);
+              console.log('🔍 API Response structure:', {
+                hasItems: !!response.data.items,
+                itemsType: typeof response.data.items,
+                itemsLength: Array.isArray(response.data.items) ? response.data.items.length : 'not array',
+                fullResponse: JSON.stringify(response.data, null, 2)
+              });
               
               // If API returns cart items, use them
               if (Array.isArray(response.data.items) && response.data.items.length > 0) {
@@ -81,24 +125,28 @@ const CartScreen = () => {
                   quantity: number;
                   imageUrl?: string;
                   image?: any;
+                  description?: string;
                 }
                 
                 // Map API cart items to our CartItem format if needed
                 // When mapping API cart items, ensure productId is used for id and productId fields
                 const apiCartItems = response.data.items.map((item: ApiCartItem) => ({
-                  id: item.productId || item.id, // for UI
-                  productId: item.productId || item.id, // always keep productId for API
-                  name: item.productName || item.name,
-                  price: item.price,
-                  quantity: item.quantity,
-                  image: item.imageUrl || item.image
+                  id: item.productId || item.id || `unknown-${Date.now()}`, // for UI
+                  name: item.productName || item.name || 'Unknown Product',
+                  price: item.price || 0,
+                  quantity: item.quantity || 1,
+                  image: item.imageUrl ? { uri: item.imageUrl } : item.image || require('../../assets/logo.png'),
+                  description: item.description || '',
+                  source: 'api' as const
                 }));
                 
-                setCartItems(apiCartItems);
-                console.log('Updated cart items from API');
-                
-                // Also update local storage to keep them in sync
-                await saveCartItems(apiCartItems);
+                // Only update if we have valid items
+                if (apiCartItems.length > 0 && apiCartItems.every((item: CartItem) => item.id && item.name)) {
+                  setCartItems(apiCartItems);
+                  console.log('Updated cart items from API:', apiCartItems.length);
+                } else {
+                  console.log('API returned invalid cart items, skipping update');
+                }
               } else {
                 console.log('No cart items returned from API');
               }
@@ -124,16 +172,33 @@ const CartScreen = () => {
     loadData();
   }, []);
 
-  // Address state
-  const [address, setAddress] = useState(selectedAddress);
-  
-  // Order success modal state
-  const [showOrderSuccess, setShowOrderSuccess] = useState(false);
+  // Reload address and cart when screen comes into focus (in case they were updated elsewhere)
+  useFocusEffect(
+    React.useCallback(() => {
+      const reloadData = async () => {
+        // Refresh cart items
+        await refreshCart();
+        console.log('Cart refreshed on screen focus');
+        
+        // Reload address
+        const savedAddress = await loadSelectedAddressFromStorage();
+        if (savedAddress && (!address || JSON.stringify(address) !== JSON.stringify(savedAddress))) {
+          setAddress(savedAddress);
+          console.log('Address reloaded from storage on screen focus');
+        }
+      };
+      reloadData();
+    }, [])
+  );
 
-  // Listen for address updates from MyAddress screen
+  // Listen for address updates from MyAddress screen and save to storage
   React.useEffect(() => {
     if (route.params?.selectedAddress) {
-      setAddress(route.params.selectedAddress);
+      const newAddress = route.params.selectedAddress;
+      setAddress(newAddress);
+      // Save the selected address to storage so it persists
+      saveSelectedAddressToStorage(newAddress);
+      console.log('Address updated from MyAddress screen and saved');
     }
   }, [route.params?.selectedAddress]);
 
@@ -150,46 +215,54 @@ const CartScreen = () => {
       // Get the new items coming in
       const incomingItems = route.params.cartItems;
       
-      setCartItems(currentItems => {
-        // If we don't have current items, just use incoming items
-        if (!currentItems || currentItems.length === 0) {
-          return [...incomingItems];
-        }
-        
-        // Create a map for quick lookups using ID as key
-        const currentItemsMap = new Map();
-        
-        // Populate the map with current cart items
-        currentItems.forEach(item => {
-          currentItemsMap.set(item.id, {...item});
-        });
-        
-        // Process each incoming item
-        incomingItems.forEach(newItem => {
-          // Check if this item already exists in cart
-          if (currentItemsMap.has(newItem.id)) {
-            // Get existing item
-            const existingItem = currentItemsMap.get(newItem.id);
-            
-            // Replace with updated quantity (do not add quantities together)
-            currentItemsMap.set(newItem.id, {
-              ...newItem,
-              quantity: newItem.quantity
-            });
-          } else {
-            // Item doesn't exist in cart, add it
-            currentItemsMap.set(newItem.id, {...newItem});
-          }
-        });
-        
-        // Convert map back to array
-        return Array.from(currentItemsMap.values());
+      // Get current cart items and merge with incoming items
+      const currentItems = cartItems;
+      
+      // If we don't have current items, just use incoming items
+      if (!currentItems || currentItems.length === 0) {
+        setCartItems([...incomingItems]);
+        return;
+      }
+      
+      // Create a map for quick lookups using ID as key
+      const currentItemsMap = new Map();
+      
+      // Populate the map with current cart items
+      currentItems.forEach((item: CartItem) => {
+        currentItemsMap.set(item.id, {...item});
       });
+      
+      // Process each incoming item
+      incomingItems.forEach((newItem: CartItem) => {
+        // Check if this item already exists in cart
+        if (currentItemsMap.has(newItem.id)) {
+          // Get existing item
+          const existingItem = currentItemsMap.get(newItem.id);
+          
+          // Replace with updated quantity (do not add quantities together)
+          currentItemsMap.set(newItem.id, {
+            ...newItem,
+            quantity: newItem.quantity
+          });
+        } else {
+          // Item doesn't exist in cart, add it
+          currentItemsMap.set(newItem.id, {...newItem});
+        }
+      });
+      
+      // Convert map back to array and update cart
+      const updatedItems = Array.from(currentItemsMap.values());
+      setCartItems(updatedItems);
     }
   }, [route.params]);
 
   // Handler to navigate to MyAddress screen and select address
-  const handleSelectAddress = () => {
+  const handleSelectAddress = async () => {
+    // Save current address before navigating (if any)
+    if (address) {
+      await saveSelectedAddressToStorage(address);
+    }
+    
     // Always pass the actual phone number, not userId
     navigation.navigate('MyAddress', {
       userName,
@@ -200,7 +273,7 @@ const CartScreen = () => {
 
   const updateQuantity = async (id: string, change: number) => {
     // Find the current item
-    const currentItem = cartItems.find(item => item.id === id || item.productId === id);
+    const currentItem = cartItems.find(item => item.id === id);
     if (!currentItem) return;
     
     // Calculate new quantity
@@ -208,32 +281,20 @@ const CartScreen = () => {
     
     // If quantity becomes 0, remove the item
     if (newQuantity === 0) {
-      removeItemCompletely(currentItem.productId || currentItem.id);
+      removeItemCompletely(id);
       return;
     }
     
     // Set updating state for this item
     setUpdatingItems(prev => ({ ...prev, [id]: true }));
     
-    // Update cart items in state immediately for responsive UI
-    const updatedItems = cartItems.map(item => 
-      (item.id === id || item.productId === id)
-        ? { ...item, quantity: newQuantity }
-        : item
-    );
-    setCartItems(updatedItems);
-    
     try {
-      // Use productId for API
-      const productIdForApi = currentItem.productId || currentItem.id;
-      console.log('Cart - Updating quantity via API POST:', {
-        productId: productIdForApi,
-        quantity: newQuantity
-      });
+      // Update using CartContext
+      await updateCartQuantity(id, newQuantity);
       
-      // Make API call using smart cart operation
+      // Try to sync with API
       try {
-        const response = await cartApi.smartCartOperation(productIdForApi, newQuantity, false);
+        const response = await cartApi.smartCartOperation(id, newQuantity, false);
         
         if (response && response.success) {
           console.log('✅ Cart quantity updated successfully with backend sync');
@@ -243,13 +304,8 @@ const CartScreen = () => {
       } catch (apiError) {
         console.log('✅ Backend cart unavailable, local cart working perfectly:', apiError instanceof Error ? apiError.message : 'Unknown error');
       }
-      
-      // Always save to local storage regardless of API status
-      await saveCartItems(updatedItems);
     } catch (error) {
       console.log('✅ Cart operation completed locally - backend unavailable:', error instanceof Error ? error.message : 'Unknown error');
-      // Still save to local storage even if there are issues
-      await saveCartItems(updatedItems);
     } finally {
       // Clear updating state for this item
       setUpdatingItems(prev => {
@@ -262,28 +318,24 @@ const CartScreen = () => {
 
   // Update removeItem to use DELETE /api/Cart/{productId} for bin icon
   const removeItemCompletely = async (id: string) => {
-    const currentItem = cartItems.find(item => item.id === id || item.productId === id);
+    const currentItem = cartItems.find(item => item.id === id);
     if (!currentItem) return;
+    
     setUpdatingItems(prev => ({ ...prev, [id]: true }));
-    const updatedItems = cartItems.filter(item => item.id !== id && item.productId !== id);
-    setCartItems(updatedItems);
-    // Always save to local storage first for instant UI response
-    await saveCartItems(updatedItems);
     
     try {
-      // Use productId for API
-      const productIdForApi = currentItem.productId || currentItem.id;
-      console.log('Cart - Removing item completely:', productIdForApi);
+      // Remove using CartContext
+      await removeItem(id);
+      console.log('Cart - Removing item completely:', id);
       
+      // Try to sync with API
       try {
-        // Try DELETE endpoint first (most appropriate for complete removal)
-        const response = await cartApi.deleteItem(productIdForApi);
+        const response = await cartApi.deleteItem(id);
         console.log('✅ Item removed successfully using DELETE endpoint');
       } catch (deleteError) {
         console.log('DELETE failed (expected if item not in backend), trying PUT with quantity=0 fallback');
         try {
-          // Fallback to PUT with quantity=0
-          const response = await cartApi.smartCartOperation(productIdForApi, 0, false);
+          const response = await cartApi.smartCartOperation(id, 0, false);
           console.log('✅ Item removed successfully using PUT quantity=0 fallback');
         } catch (putError) {
           console.log('✅ Backend cart unavailable - item removed locally');
@@ -291,8 +343,9 @@ const CartScreen = () => {
       }
     } catch (error) {
       console.log('✅ Item removed locally - backend cart unavailable:', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setUpdatingItems(prev => ({ ...prev, [id]: false }));
     }
-    setUpdatingItems(prev => ({ ...prev, [id]: false }));
   };
 
   const handleCheckout = async () => {
@@ -325,17 +378,17 @@ const CartScreen = () => {
       // Create order object matching exact API schema
       const orderData = {
         userId: currentUserId,
-        shippingAddressId: addressId ? String(addressId) : '', // Ensure string type as API requires
+        shippingAddressId: Number(addressId), // Convert to number as required by API
         totalAmount: parseFloat(total.toFixed(2)),
-        orderStatusId: "00000000-0000-0000-0000-000000000001",
-        orderDate: new Date().toISOString(),          // ✅ Add required orderDate
-        trackingNumber: `TRK-${Date.now()}`,          // ✅ Add required trackingNumber
-        // Note: orderItems will be handled by apiService.ts conversion logic
+        orderStatusId: ORDER_STATUS.NEW,
+        orderDate: new Date().toISOString(),
+        trackingNumber: `TRK-${Date.now()}`,
         orderItems: cartItems.map(item => ({
-          productId: item.productId || item.id,
+          productId: item.id,
           quantity: item.quantity,
           price: parseFloat(item.price.toFixed(2)),
-          name: item.name || "Product"
+          productName: item.name || "Product", // Changed from 'name' to 'productName' to match API
+          imageUrl: (typeof item.image === 'string' && item.image.length > 0) ? item.image : undefined // Only use string URLs
         }))
       };
       
@@ -416,7 +469,7 @@ const CartScreen = () => {
           console.log('Order saved locally:', localOrder.orderId);
           
           // Just clear the local cart without trying to update the server
-          await saveCartItems([]);
+          await clearCart();
           console.log('Cleared local cart only (server update skipped)');
         } else {
           console.log('Order created successfully on server!');
@@ -456,16 +509,17 @@ const CartScreen = () => {
           // Clear cart in API (one by one to avoid overwhelming the server)
           for (const item of cartItems) {
             try {
-              await cartApi.updateQuantity(item.productId || item.id, 0);
-              console.log(`Cleared item ${item.productId || item.id} from cart`);
+              await cartApi.updateQuantity(item.id, 0);
+              console.log(`Cleared item ${item.id} from cart`);
             } catch (clearError) {
               console.error('Error clearing item from cart API:', clearError);
             }
           }
           
-          // Clear local cart
-          await saveCartItems([]);
-          console.log('Cleared local cart');
+          // Clear local cart and selected address
+          await clearCart();
+          await AsyncStorage.removeItem('selectedCartAddress');
+          console.log('Cleared local cart and address');
         }
         
         // Show success modal in either case
@@ -500,20 +554,19 @@ const CartScreen = () => {
   const handleOrderSuccessClose = async () => {
     setShowOrderSuccess(false);
     
-    // Clear cart in state
-    setCartItems([]);
-    
-    // Clear cart in storage
+    // Clear cart and address
     try {
-      await saveCartItems([]);
+      await clearCart();
+      setAddress(null);
+      await AsyncStorage.removeItem('selectedCartAddress');
       
       // Stay on the CartScreen instead of navigating to MyOrders
       // The user can manually navigate to MyOrders if they want to check order status
-      console.log('Order completed successfully, staying on CartScreen');
+      console.log('Order completed successfully, cleared cart and address');
       
-      // The cart is already cleared in state, so the UI will update automatically
+      // The cart and address are already cleared in state, so the UI will update automatically
     } catch (error) {
-      console.error('Error clearing cart:', error);
+      console.error('Error clearing cart and address:', error);
     }
   };
 
@@ -593,10 +646,10 @@ const CartScreen = () => {
                   </Text>
                   <TouchableOpacity 
                     style={styles.deleteButton}
-                    onPress={() => removeItemCompletely(item.productId || item.id)}
-                    disabled={updatingItems[item.productId || item.id]}
+                    onPress={() => removeItemCompletely(item.id)}
+                    disabled={updatingItems[item.id]}
                   >
-                    {updatingItems[item.productId || item.id] ? (
+                    {updatingItems[item.id] ? (
                       <ActivityIndicator size="small" color="black" />
                     ) : (
                       <Ionicons name="trash-outline" size={20} color="black" />

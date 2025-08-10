@@ -23,6 +23,7 @@ import { getCartItems, saveCartItems, CartItem } from '../utils/cartStorage';
 import { cartApi, CartItemUpdateDto, productsApi, } from '../services/apiService';
 import userService from '../services/userService';
 import { useLanguage } from '../context/LanguageContext';
+import { useCart } from '../context/CartContext';
 
 type AgriInputScreenRouteProp = RouteProp<RootStackParamList, 'AgriInputScreen'>;
 type AgriInputScreenNavigationProp = CompositeNavigationProp<
@@ -47,27 +48,23 @@ const itemWidth = (screenWidth - 45) / 2; // 45 = padding + gap
 
 const AgriInputScreen = () => {
   const { translate } = useLanguage();
+  const { cartItems, addItem, updateQuantity, removeItem } = useCart();
   const route = useRoute<AgriInputScreenRouteProp>();
   const navigation = useNavigation<AgriInputScreenNavigationProp>();
   const { userName = '', userPhone = '' } = route.params || {};
   
   const [searchText, setSearchText] = useState('');
-  const [cartItems, setCartItems] = useState<AgriCartItem[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   
-  // Load cart items from storage when component mounts or when screen comes into focus
+  // Load products when component mounts or when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      const loadCartItems = async () => {
+      const loadData = async () => {
         setLoading(true);
         try {
-          // First load cart items from storage for a quick UI update
-          const storedCartItems = await getCartItems();
-          setCartItems(storedCartItems);
-          
-          // Then fetch products
+          // Fetch products
           const productItems = await getProducts();
           
           // Use products from API
@@ -83,23 +80,64 @@ const AgriInputScreen = () => {
         }
       };
       
-      loadCartItems();
+      loadData();
     }, [])
   );
 
 
    const getProducts = async (): Promise<any[]> => {
     try {
-      console.log('Fetching products using productsApi');
+      console.log('Fetching Agri Input products using local filtering (skipping category endpoint)');
       
-      // Use the productsApi to get products
-      const response = await productsApi.getAll(1,50);
+      // Get all products and filter locally (category endpoint not implemented in backend)
+      const response = await productsApi.getAll(1, 50);
       
       if (!response.success || !response.data) {
         throw new Error(`Failed to fetch products: ${response.error || 'Unknown error'}`);
       }
       
-      const data = response.data;
+      // Filter products locally for category 2 (Agri input)
+      const allProducts = response.data;
+      console.log(`Fetched ${allProducts.length} total products, filtering for categoryId: 2`);
+      
+      // Debug: Log the structure of first few products to understand data format
+      if (allProducts.length > 0) {
+        console.log('🔍 DEBUG - Sample product structure:');
+        console.log('Product 1:', JSON.stringify(allProducts[0], null, 2));
+        if (allProducts.length > 1) {
+          console.log('Product 2:', JSON.stringify(allProducts[1], null, 2));
+        }
+        
+        // Log all unique categoryId values to see what's available
+        const categoryIds = [...new Set(allProducts.map((p: any) => p.categoryId))];
+        console.log('🔍 Available categoryIds:', categoryIds);
+      }
+      
+      const filteredData = allProducts.filter((product: any) => {
+        const matchesCategoryId = product.categoryId === 2;
+        const matchesNestedCategory = product.category && product.category.id === 2;
+        const matchesAgriKeywords = product.name && (
+          product.name.toLowerCase().includes('seed') ||
+          product.name.toLowerCase().includes('fertilizer') ||
+          product.name.toLowerCase().includes('pesticide') ||
+          product.name.toLowerCase().includes('agri') ||
+          product.name.toLowerCase().includes('farming') ||
+          product.name.toLowerCase().includes('crop')
+        );
+        
+        // Debug each product's filtering
+        console.log(`🔍 Product "${product.name}": categoryId=${product.categoryId}, matches=${matchesCategoryId || matchesNestedCategory || matchesAgriKeywords}`);
+        
+        const matches = matchesCategoryId || matchesNestedCategory || matchesAgriKeywords;
+        if (matches) {
+          console.log(`✅ Found Agri product: ${product.name} (categoryId: ${product.categoryId})`);
+        }
+        return matches;
+      });
+      
+      console.log(`Found ${filteredData.length} Agri Input products after local filtering`);
+      
+      const data = filteredData;
       console.log('AgriInput API Response:', JSON.stringify(data).substring(0, 200)); // Log first part of response
       
       if (!Array.isArray(data)) {
@@ -116,12 +154,20 @@ const AgriInputScreen = () => {
       // Map the data to our product format
       const mappedProducts = data.map((item: any) => {
         console.log('AgriInput processing item image:', item.imageUrl); // Log each image URL
+        
+        // Validate if imageUrl is a real URL (not just placeholder text like "string")
+        const isValidImageUrl = item.imageUrl && 
+          item.imageUrl !== 'string' && 
+          item.imageUrl !== 'null' && 
+          item.imageUrl !== 'undefined' &&
+          (item.imageUrl.startsWith('http://') || item.imageUrl.startsWith('https://') || item.imageUrl.startsWith('/'));
+        
         return {
           id: item.productId || `product-${Math.random().toString(36).substring(2, 9)}`,
           name: item.name || 'Product',
           price: item.price || 0,
           // Handle image URL or fallback to a default image
-          image: item.imageUrl ? { uri: item.imageUrl } : require('../../assets/logo.png'),
+          image: isValidImageUrl ? { uri: item.imageUrl } : require('../../assets/logo.png'),
           description: item.description || '',
           productId: item.productId // Ensure productId is mapped
         };
@@ -146,39 +192,38 @@ const AgriInputScreen = () => {
   );
 
   const getCartItemQuantity = (productId: string): number => {
-    const item = cartItems.find(item => (item.productId || item.id) === productId);
+    const item = cartItems.find(item => item.id === productId);
     return item ? item.quantity : 0;
   };
 
   const addToCart = async (product: Product) => {
     try {
-      const currentCart = await getCartItems();
       const productIdForApi = product.productId || product.id;
       if (!productIdForApi || productIdForApi === '00000000-0000-0000-0000-000000000000') {
         console.error('AgriInput - Invalid product ID, cannot add to cart');
         return;
       }
-      const existingItem = currentCart.find((item: AgriCartItem) => (item.productId || item.id) === productIdForApi);
-      let updatedCart: AgriCartItem[];
-      let response;
-      if (existingItem) {
-        const newQuantity = existingItem.quantity + 1;
-        updatedCart = currentCart.map((item: AgriCartItem) =>
-          (item.productId || item.id) === productIdForApi
-            ? { ...item, quantity: newQuantity }
-            : item
-        );
-        response = await cartApi.updateQuantity(productIdForApi, newQuantity);
-      } else {
-        updatedCart = [...currentCart, { ...product, quantity: 1, productId: productIdForApi }];
-        response = await cartApi.updateQuantity(productIdForApi, 1);
-      }
-      await saveCartItems(updatedCart);
-      setCartItems(updatedCart);
-      if (response && !response.success) {
-        console.error('AgriInput - API Error with cart operation:', response.error);
-      } else {
-        console.log('AgriInput - Successfully performed cart operation via API');
+
+      // Create cart item with proper structure
+      const cartItem: CartItem = {
+        id: productIdForApi,
+        name: product.name,
+        price: product.price,
+        image: product.image,
+        description: product.description,
+        quantity: 1,
+        source: 'agri-input'
+      };
+
+      // Add to cart using context
+      addItem(cartItem);
+
+      // Also try to sync with API
+      try {
+        await cartApi.updateQuantity(productIdForApi, 1);
+        console.log('AgriInput - Successfully synced with API');
+      } catch (apiError) {
+        console.log('AgriInput - API sync failed, but item added locally:', apiError);
       }
     } catch (error) {
       console.error('Error adding to cart:', error);
@@ -187,32 +232,34 @@ const AgriInputScreen = () => {
 
   const removeFromCart = async (productId: string) => {
     try {
-      const currentCart = await getCartItems();
-      const existingItem = currentCart.find((item: AgriCartItem) => (item.productId || item.id) === productId);
+      const existingItem = cartItems.find(item => item.id === productId);
       if (!existingItem) {
         console.error('Item not found in cart');
         return;
       }
-      let updatedCart: AgriCartItem[];
-      let response;
+
       if (existingItem.quantity > 1) {
-        const newQuantity = existingItem.quantity - 1;
-        updatedCart = currentCart.map((item: AgriCartItem) =>
-          (item.productId || item.id) === productId
-            ? { ...item, quantity: newQuantity }
-            : item
-        );
-        response = await cartApi.updateQuantity(productId, newQuantity);
+        // Decrease quantity by 1
+        updateQuantity(productId, existingItem.quantity - 1);
+        
+        // Try to sync with API
+        try {
+          await cartApi.updateQuantity(productId, existingItem.quantity - 1);
+          console.log('AgriInput - Successfully updated quantity via API');
+        } catch (apiError) {
+          console.log('AgriInput - API sync failed, but quantity updated locally:', apiError);
+        }
       } else {
-        updatedCart = currentCart.filter((item: AgriCartItem) => (item.productId || item.id) !== productId);
-        response = await cartApi.removeItem(productId);
-      }
-      await saveCartItems(updatedCart);
-      setCartItems(updatedCart);
-      if (response && !response.success) {
-        console.error('AgriInput - API Error removing item:', response.error);
-      } else {
-        console.log('AgriInput - Successfully removed item via API');
+        // Remove item completely
+        removeItem(productId);
+        
+        // Try to sync with API
+        try {
+          await cartApi.removeItem(productId);
+          console.log('AgriInput - Successfully removed item via API');
+        } catch (apiError) {
+          console.log('AgriInput - API sync failed, but item removed locally:', apiError);
+        }
       }
     } catch (error) {
       console.error('Error removing from cart:', error);

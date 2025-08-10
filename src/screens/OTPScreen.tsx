@@ -110,8 +110,16 @@ const OtpScreen = ({ route }: any) => {
   // Function to verify OTP
   const handleVerify = async (otpArray = otp) => {
     const enteredOtp = otpArray.join('');
+    
+    // Enhanced OTP validation
     if (enteredOtp.length !== 6) {
       Alert.alert('Invalid OTP', 'Please enter a 6-digit OTP');
+      return;
+    }
+    
+    // Validate OTP format (only digits)
+    if (!/^\d{6}$/.test(enteredOtp)) {
+      Alert.alert('Invalid OTP', 'OTP must contain only numbers');
       return;
     }
     
@@ -122,50 +130,72 @@ const OtpScreen = ({ route }: any) => {
     }
     
     setIsLoading(true);
-    let result = await verifyOtp(phoneNumber, enteredOtp);
-    // If OTP verification fails, just show an error (no registration prompt)
-    if (!result.success) {
-      Alert.alert('Verification Failed', result.error || 'Invalid identifier or OTP.');
-      setIsLoading(false);
-      return;
-    }
-    if (result.success && result.data && result.data.token) {
-      // Save the token first
-      await saveAuthToken(result.data.token);
-      // After successful OTP verification, fetch user info from /me
-      const userInfo = await fetchCurrentUserFromApi();
-      if (userInfo && userInfo.id) {
-        await saveUser(userInfo);
-        setShowPopup(true);
-        setTimeout(() => {
-          setShowPopup(false);
-          // Navigate to correct home screen based on role
-          if (userInfo.role === 'manager' || userInfo.role === 'admin') {
-            navigation.replace('AdminTabs', {
-              userName: userInfo.name || userInfo.phoneNumber || '',
-              userPhone: userInfo.phoneNumber,
-              profileImage: userInfo.profilePicture,
-              designation: userInfo.role,
-              screen: 'AdminHome',
-              params: {}
-            });
-          } else {
-            navigation.replace('HomeTabs', {
-              userName: userInfo.name || userInfo.phoneNumber || '',
-              userPhone: userInfo.phoneNumber,
-              profileImage: userInfo.profilePicture,
-              screen: 'Home',
-              params: {}
-            });
-          }
-        }, 1500);
-      } else {
-        Alert.alert('Error', 'Failed to fetch user info after OTP verification.');
+    try {
+      const result = await verifyOtp(phoneNumber, enteredOtp);
+      
+      if (!result) {
+        Alert.alert('Network Error', 'Unable to connect to server. Please check your internet connection.');
+        setIsLoading(false);
+        return;
       }
+      
+      if (!result.success) {
+        // Handle specific error cases
+        let errorMessage = result.error || 'Invalid OTP. Please try again.';
+        
+        if (result.error?.includes('expired')) {
+          errorMessage = 'OTP has expired. Please request a new one.';
+        } else if (result.error?.includes('invalid')) {
+          errorMessage = 'Invalid OTP. Please check and try again.';
+        } else if (result.error?.includes('attempts')) {
+          errorMessage = 'Too many attempts. Please request a new OTP.';
+        }
+        
+        Alert.alert('Verification Failed', errorMessage);
+        setIsLoading(false);
+        return;
+      }
+      
+      if (result.success && result.data && result.data.token) {
+        // Save the token first
+        await saveAuthToken(result.data.token);
+        // After successful OTP verification, fetch user info from /me
+        const userInfo = await fetchCurrentUserFromApi();
+        if (userInfo && userInfo.id) {
+          await saveUser(userInfo);
+          setShowPopup(true);
+          setTimeout(() => {
+            setShowPopup(false);
+            // Navigate to correct home screen based on role
+            if (userInfo.role === 'manager' || userInfo.role === 'admin') {
+              navigation.replace('AdminTabs', {
+                userName: userInfo.name || userInfo.phoneNumber || '',
+                userPhone: userInfo.phoneNumber,
+                profileImage: userInfo.profilePicture,
+                designation: userInfo.role,
+                screen: 'AdminHome',
+                params: {}
+              });
+            } else {
+              navigation.replace('HomeTabs', {
+                userName: userInfo.name || userInfo.phoneNumber || '',
+                userPhone: userInfo.phoneNumber,
+                profileImage: userInfo.profilePicture,
+                screen: 'Home',
+                params: {}
+              });
+            }
+          }, 1500);
+        } else {
+          Alert.alert('Error', 'Failed to fetch user info after OTP verification.');
+        }
+      }
+    } catch (error) {
+      console.error('OTP verification error:', error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
-      return;
     }
-    setIsLoading(false);
   };
 
   // Array of input refs for auto-focus

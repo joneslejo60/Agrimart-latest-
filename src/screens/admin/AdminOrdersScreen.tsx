@@ -19,6 +19,8 @@ import { RootStackParamList, AdminTabsParamList } from '../../navigation/navigat
 import { useLanguage } from '../../context/LanguageContext';
 import { adminApi, AdminOrder } from '../../services/adminApiService';
 import apiService from '../../services/apiService';
+import { ORDER_STATUS, getOrderStatusName } from '../../constants/orderStatus';
+import { OrderStatusStorage } from '../../utils/orderStatusStorage';
 
 type AdminOrdersScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<AdminTabsParamList, 'AdminOrders'>,
@@ -32,8 +34,19 @@ const AdminOrdersScreen = () => {
   const route = useRoute<AdminOrdersScreenRouteProp>();
   const { userName = '', userPhone = '', designation = 'Manager', profileImage, selectedTab: initialTab = 'all' } = route.params || {};
   
+  // Debug: Log the initial tab received from navigation
+  console.log('🎯 AdminOrdersScreen received initialTab:', initialTab);
+  console.log('🎯 Route params:', route.params);
+  
   // State for selected tab
-  const [selectedTab, setSelectedTab] = useState<'all' | 'pending' | 'new'>(initialTab);
+  const [selectedTab, setSelectedTab] = useState<'all' | 'processing' | 'new'>(initialTab);
+  
+  // IMPORTANT: Update selectedTab when route params change
+  // This handles the case where the screen is reused instead of remounted
+  useEffect(() => {
+    console.log('🎯 Route params changed, updating selectedTab from:', selectedTab, 'to:', initialTab);
+    setSelectedTab(initialTab);
+  }, [initialTab]);
   
   // State for search
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,24 +87,57 @@ const AdminOrdersScreen = () => {
     }
   }, []);
 
-  // Filter orders based on selected tab and search query
-  const filteredOrders = orders.filter(order => {
-    // Map order status to tab names
-    const getStatusName = (statusId: number) => {
-      // This is a simplified mapping - you might want to get this from API
-      if (statusId === 1) return 'new';
-      if (statusId === 2) return 'pending';
-      if (statusId === 3) return 'completed';
-      return 'all';
+  // Get status category for an order (considering local status updates)
+  const getOrderStatusCategory = (statusName: string) => {
+    const status = statusName.toLowerCase();
+    switch (status) {
+      case 'confirmed':
+      case 'new':
+        return 'new';
+      case 'processing':
+        return 'processing';
+      case 'shipped':
+      case 'delivered':
+        return 'completed';
+      case 'cancelled':
+        return 'cancelled';
+      default:
+        return 'all';
+    }
+  };
+
+  // State for orders with effective status (including local updates)
+  const [ordersWithEffectiveStatus, setOrdersWithEffectiveStatus] = useState<(AdminOrder & { effectiveStatus: string })[]>([]);
+
+  // Load effective status for all orders
+  useEffect(() => {
+    const loadEffectiveStatuses = async () => {
+      const ordersWithStatus = await Promise.all(
+        orders.map(async (order) => {
+          const effectiveStatus = await OrderStatusStorage.getEffectiveOrderStatus(order);
+          return {
+            ...order,
+            effectiveStatus
+          };
+        })
+      );
+      setOrdersWithEffectiveStatus(ordersWithStatus);
     };
-    
-    // First filter by selected tab
-    const orderStatus = getStatusName(order.orderStatusId);
-    const matchesTab = selectedTab === 'all' || orderStatus === selectedTab;
+
+    if (orders.length > 0) {
+      loadEffectiveStatuses();
+    }
+  }, [orders]);
+
+  // Filter orders based on selected tab and search query
+  const filteredOrders = ordersWithEffectiveStatus.filter(order => {
+    // First filter by selected tab using effective status
+    const orderStatusCategory = getOrderStatusCategory(order.effectiveStatus);
+    const matchesTab = selectedTab === 'all' || orderStatusCategory === selectedTab;
     
     // Then filter by search query (order ID or user name)
     const matchesSearch = searchQuery === '' || 
-      (order.orderId != null && order.orderId.toString().includes(searchQuery)) ||
+      (order.id != null && order.id.includes(searchQuery)) ||
       (order.userName && order.userName.toLowerCase().includes(searchQuery.toLowerCase()));
     
     return matchesTab && matchesSearch;
@@ -105,7 +151,7 @@ const AdminOrdersScreen = () => {
   // Fetch user profiles for all unique userIds in filteredOrders
   useEffect(() => {
     async function fetchUserProfiles() {
-      const userIds = Array.from(new Set(filteredOrders.map(order => String(order.userId))));
+      const userIds = Array.from(new Set(filteredOrders.map(order => order.userId)));
       // Only fetch if not already in userProfiles and not previously failed
       const missingUserIds = userIds.filter(id => !(id in userProfiles) && !failedUserIds.has(id));
       if (missingUserIds.length === 0) return;
@@ -173,12 +219,12 @@ const AdminOrdersScreen = () => {
       userPhone,
       profileImage,
       designation,
-      orderId: order.orderId != null ? order.orderId.toString() : '',
+      orderId: order.id || '',
       orderData: order
     });
   };
 
-  const handleTabPress = (tab: 'all' | 'pending' | 'new') => {
+  const handleTabPress = (tab: 'all' | 'processing' | 'new') => {
     setSelectedTab(tab);
   };
 
@@ -191,22 +237,36 @@ const AdminOrdersScreen = () => {
   };
 
   // Render product images with +N indicator
-  const renderProductImages = (products: any[]) => {
-    const maxVisible = 5;
-    const visibleProducts = products.slice(0, maxVisible);
-    const remainingCount = products.length - maxVisible;
+  const renderProductImages = (orderItems: any[]) => {
+    if (!orderItems || orderItems.length === 0) return null;
+    
+    const maxVisible = 3;
+    const visibleItems = orderItems.slice(0, maxVisible);
+    const remainingCount = orderItems.length - maxVisible;
 
     return (
       <View style={styles.productImagesContainer}>
-        {visibleProducts.map((product, index) => (
-          <Image
-            key={product.id}
-            source={product.image}
-            style={[
-              styles.productImage,
-              { zIndex: visibleProducts.length - index }
-            ]}
-          />
+        {visibleItems.map((item, index) => (
+          item.imageUrl ? (
+            <Image
+              key={item.orderItemId || index}
+              source={{ uri: item.imageUrl }}
+              style={[
+                styles.productImage,
+                { zIndex: visibleItems.length - index }
+              ]}
+            />
+          ) : (
+            <View
+              key={item.orderItemId || index}
+              style={[
+                styles.productImagePlaceholder,
+                { zIndex: visibleItems.length - index }
+              ]}
+            >
+              <Icon name="image" size={12} color="#ccc" />
+            </View>
+          )
         ))}
         {remainingCount > 0 && (
           <View style={styles.remainingCountContainer}>
@@ -217,26 +277,32 @@ const AdminOrdersScreen = () => {
     );
   };
 
-  // Get border color based on status
-  const getBorderColor = (status: string) => {
+  // Get border color based on effective status
+  const getBorderColor = (effectiveStatus: string) => {
+    const category = getOrderStatusCategory(effectiveStatus);
     if (selectedTab === 'all') {
-      if (status === 'pending') return '#FF9500';
-      if (status === 'new') return '#007AFF';
+      if (category === 'processing') return '#FF9500';
+      if (category === 'new') return '#007AFF';
+      if (category === 'completed') return '#09A84E';
+      if (category === 'cancelled') return '#FF3B30';
       return '#09A84E';
     }
-    if (selectedTab === 'pending') return '#FF9500';
+    if (selectedTab === 'processing') return '#FF9500';
     if (selectedTab === 'new') return '#007AFF';
     return '#09A84E';
   };
 
-  // Get cost color based on status
-  const getCostColor = (status: string) => {
+  // Get cost color based on effective status
+  const getCostColor = (effectiveStatus: string) => {
+    const category = getOrderStatusCategory(effectiveStatus);
     if (selectedTab === 'all') {
-      if (status === 'pending') return '#FF9500';
-      if (status === 'new') return '#007AFF';
+      if (category === 'processing') return '#FF9500';
+      if (category === 'new') return '#007AFF';
+      if (category === 'completed') return '#09A84E';
+      if (category === 'cancelled') return '#FF3B30';
       return '#09A84E';
     }
-    if (selectedTab === 'pending') return '#FF9500';
+    if (selectedTab === 'processing') return '#FF9500';
     if (selectedTab === 'new') return '#007AFF';
     return '#09A84E';
   };
@@ -279,32 +345,19 @@ const AdminOrdersScreen = () => {
             <TouchableOpacity 
               style={[
                 styles.tabButton, 
-                selectedTab === 'pending' && styles.selectedTabButton
+                selectedTab === 'processing' && styles.selectedTabButton
               ]}
-              onPress={() => handleTabPress('pending')}
+              onPress={() => handleTabPress('processing')}
             >
               <Text style={[
                 styles.tabText,
-                selectedTab === 'pending' && styles.selectedTabText
+                selectedTab === 'processing' && styles.selectedTabText
               ]}>
-                {translate('Pending')}
+                {translate('Processing')}
               </Text>
             </TouchableOpacity>
             
-            <TouchableOpacity 
-              style={[
-                styles.tabButton, 
-                selectedTab === 'new' && styles.selectedTabButton
-              ]}
-              onPress={() => handleTabPress('new')}
-            >
-              <Text style={[
-                styles.tabText,
-                selectedTab === 'new' && styles.selectedTabText
-              ]}>
-                {translate('New')}
-              </Text>
-            </TouchableOpacity>
+          {/* New tab removed - only keeping All and Processing */}
           </View>
           
           {/* Search Bar */}
@@ -331,19 +384,27 @@ const AdminOrdersScreen = () => {
           {filteredOrders.length > 0 ? (
             filteredOrders.map((order, index) => (
               <TouchableOpacity 
-                key={`${order.orderId}-${index}`}
+                key={`${order.id}-${index}`}
                 style={[
                   styles.orderCard,
-                  { borderColor: getBorderColor(order.orderStatusId != null ? order.orderStatusId.toString() : '0') }
+                  { borderColor: getBorderColor(order.effectiveStatus) }
                 ]}
                 onPress={() => handleOrderPress(order)}
                 activeOpacity={0.7}
               >
                 {/* Order ID and Cost */}
-                <View style={styles.orderHeader}>
-                  <Text style={styles.orderId}>Order ID: {order.orderId || 'N/A'}</Text>
-                  <Text style={[styles.orderCost, { color: getCostColor(order.orderStatusId != null ? order.orderStatusId.toString() : '0') }]}>₹{order.totalAmount || 0}</Text>
-                </View>
+               <View style={styles.orderHeader}>
+  <Text style={styles.orderId}>
+    Order ID: {order.id ? `${order.id.substring(0, 8)}...` : 'N/A'}
+  </Text>
+  <Text style={[styles.orderCost, { color: getCostColor(order.effectiveStatus) }]}>
+    ₹{order.totalAmount || 0}
+  </Text>
+</View>
+
+                {/* Product Images */}
+                {renderProductImages(order.orderItems || [])}
+                
                 {/* Order Items Info */}
                 <View style={styles.orderItemsContainer}>
                   <Text style={styles.orderItemsText}>
@@ -360,20 +421,20 @@ const AdminOrdersScreen = () => {
                   <View style={styles.userDetailsContainer}>
                     <View style={styles.nameContainer}>
                       <Icon name="user" size={12} color="#333" style={styles.nameIcon} />
-                      <Text style={styles.userName}>{userProfiles[String(order.userId)]?.name || 'Customer'}</Text>
+                      <Text style={styles.userName}>{userProfiles[order.userId]?.name || 'Customer'}</Text>
                     </View>
                     <View style={styles.phoneContainer}>
                       <Icon name="phone" size={12} color="#333" style={styles.phoneIcon} />
-                      <Text style={styles.phoneText}>{userProfiles[String(order.userId)]?.phoneNumber || 'N/A'}</Text>
+                      <Text style={styles.phoneText}>{userProfiles[order.userId]?.phoneNumber || 'N/A'}</Text>
                     </View>
                   </View>
-                  <View style={styles.statusContainer}>
+                  {/* <View style={styles.statusContainer}>
                     <Text style={styles.statusText}>
                       {addressMap[String(order.shippingAddressId)]
                         ? `${addressMap[String(order.shippingAddressId)].street || ''}, ${addressMap[String(order.shippingAddressId)].city || ''}, ${addressMap[String(order.shippingAddressId)].state || ''}, ${addressMap[String(order.shippingAddressId)].zipCode || ''}`
                         : 'Loading address...'}
                     </Text>
-                  </View>
+                  </View> */}e
                 </View>
               </TouchableOpacity>
             ))
@@ -536,6 +597,17 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 6,
     marginRight: 4,
+  },
+  productImagePlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    marginRight: 4,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
   remainingCountContainer: {
     width: 32,

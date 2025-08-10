@@ -6,9 +6,13 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { HomeTabsParamList } from './navigation.types';
 import { tabConfigs, tabBarOptions } from './tabConfig';
 import { useLanguage } from '../context/LanguageContext';
+import { useCart } from '../context/CartContext';
+import TabBarIcon from '../components/TabBarIcon';
 
 const Tab = createBottomTabNavigator<HomeTabsParamList>();
-const getTabScreenOptions = ({ route }: { route: any }) => {
+
+const TabScreenOptions = ({ route }: { route: any }) => {
+  const { cartCount } = useCart();
   const tabConfig = tabConfigs.find(config => config.name === route.name);
 
   return {
@@ -16,7 +20,17 @@ const getTabScreenOptions = ({ route }: { route: any }) => {
     
     tabBarIcon: ({ color, size }: { color: string; size: number }) => {
       const iconName = tabConfig?.iconName || 'home-outline';
-      return <Ionicons name={iconName} size={size} color={color} />;
+      const isCartTab = route.name === 'Cart';
+      
+      return (
+        <TabBarIcon
+          iconName={iconName}
+          color={color}
+          size={size}
+          badgeCount={cartCount}
+          showBadge={isCartTab}
+        />
+      );
     },
     
     tabBarActiveTintColor: tabBarOptions.activeTintColor,
@@ -38,7 +52,7 @@ const BottomTabNavigator: React.FC<BottomTabNavigatorProps> = ({ userName, userP
   
   return (
     <Tab.Navigator 
-      screenOptions={getTabScreenOptions}
+      screenOptions={TabScreenOptions}
       initialRouteName={initialScreen as keyof HomeTabsParamList}
     >
       {tabConfigs.map((tabConfig) => {

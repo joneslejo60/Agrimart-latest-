@@ -412,12 +412,7 @@ const EditAdminProfileScreen = () => {
 
 export default EditAdminProfileScreen;
 
-/**
- *  Styling Configuration - Beautiful & Functional Design
- * 
- * Consistent with the app's design language while providing
- * an intuitive and accessible user experience.
- */
+
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 

@@ -299,6 +299,7 @@ const AdminProducts = () => {
           <View style={styles.headingContainer}>
             <Text style={styles.headingText}>Product Details</Text>
           </View>
+
           {/* Category Dropdown */}
           <View style={styles.inputContainer}>
             <TouchableOpacity 
@@ -312,7 +313,7 @@ const AdminProducts = () => {
             </TouchableOpacity>
             
             {showCategoryDropdown && (
-              <View style={styles.dropdownList}>
+              <ScrollView style={styles.dropdownList} nestedScrollEnabled={true} showsVerticalScrollIndicator={true}>
                 {categories.map((category) => (
                   <TouchableOpacity
                     key={category.id}
@@ -325,7 +326,7 @@ const AdminProducts = () => {
                     <Text style={styles.dropdownItemText}>{category.name}</Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             )}
           </View>
 

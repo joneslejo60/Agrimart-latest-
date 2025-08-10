@@ -36,7 +36,7 @@ export type HomeTabsParamList = {
 
 export type AdminTabsParamList = {
   AdminHome: { userName?: string; userPhone?: string; designation?: string; profileImage?: string };      // Admin dashboard
-  AdminOrders: { userName?: string; userPhone?: string; designation?: string; profileImage?: string; selectedTab?: 'all' | 'pending' | 'new' };    //  Order management for admin
+  AdminOrders: { userName?: string; userPhone?: string; designation?: string; profileImage?: string; selectedTab?: 'all' | 'processing' | 'new' };    //  Order management for admin
   AdminInventory: { userName?: string; userPhone?: string; designation?: string; profileImage?: string }; // inventory management for admin
   AdminProfile: { userName?: string; userPhone?: string; designation?: string; profileImage?: string };   //  Admin profile screen
 }

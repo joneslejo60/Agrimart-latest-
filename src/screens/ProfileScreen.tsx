@@ -13,7 +13,7 @@ import {
   Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, HomeTabsParamList } from '../navigation/navigation.types';
 import * as ImagePicker from 'react-native-image-picker';
@@ -37,6 +37,10 @@ const ProfileScreen = () => {
   // Use the profile image passed from EditProfileScreen or null
   const [profileImage, setProfileImage] = useState(initialProfileImage || null);
   
+  // State for user data
+  const [currentUserName, setCurrentUserName] = useState(userName || '');
+  const [currentUserPhone, setCurrentUserPhone] = useState(userPhone || '');
+  
   // Log the profile image received from navigation params
   console.log('ProfileScreen received profile image:', initialProfileImage);
   
@@ -47,6 +51,33 @@ const ProfileScreen = () => {
       setProfileImage(initialProfileImage);
     }
   }, [initialProfileImage]);
+  
+  // Refresh user data when screen gains focus
+  useFocusEffect(
+    React.useCallback(() => {
+      const refreshUserData = async () => {
+        try {
+          console.log('🔄 ProfileScreen gained focus - refreshing user data');
+          const userData = await userService.getUser();
+          if (userData) {
+            console.log('✅ Refreshed user data:', userData);
+            setCurrentUserName(userData.name || userName || '');
+            setCurrentUserPhone(userData.phoneNumber || userPhone || '');
+            // Update the display variables as well
+            setName(userData.name || userName || 'User Name');
+            setPhone(formatPhoneNumber(userData.phoneNumber || userPhone));
+            if (userData.profilePicture) {
+              setProfileImage(userData.profilePicture);
+            }
+          }
+        } catch (error) {
+          console.error('Error refreshing user data:', error);
+        }
+      };
+      
+      refreshUserData();
+    }, [userName, userPhone])
+  );
   
   // Load user data from storage when component mounts
   useEffect(() => {
@@ -82,7 +113,7 @@ const ProfileScreen = () => {
     }
     return DEFAULT_USER_IMAGE;
   };
-  const [name, setName] = useState(userName || 'User Name');
+  const [name, setName] = useState(currentUserName || 'User Name');
   // Ensure phone number is properly formatted
   const formatPhoneNumber = (phoneStr: string | undefined): string => {
     if (!phoneStr) return '+91 9123456789'; // Default phone
@@ -112,7 +143,7 @@ const ProfileScreen = () => {
     return phoneStr;
   };
   
-  const [phone, setPhone] = useState(formatPhoneNumber(userPhone));
+  const [phone, setPhone] = useState(formatPhoneNumber(currentUserPhone));
 
   const options: Array<{
     id: string;
@@ -121,16 +152,16 @@ const ProfileScreen = () => {
     color: string;
     action?: () => void;
   }> = [
-    { 
-      id: '1', 
-      label: translate('My Orders'), 
-      icon: 'shopping-cart', 
-      color: 'black',
-      action: () => navigation.navigate('MyOrders', {
-        userName: name,
-        userPhone: phone,
-      }),
-    },
+    // { 
+    //   id: '1', 
+    //   label: translate('My Orders'), 
+    //   icon: 'shopping-cart', 
+    //   color: 'black',
+    //   action: () => navigation.navigate('MyOrders', {
+    //     userName: name,
+    //     userPhone: phone,
+    //   }),
+    // },
     { 
       id: '2', 
       label: translate('My Address'), 

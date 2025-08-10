@@ -67,7 +67,7 @@ export const ADDRESS_ENDPOINTS = {
   GET_BY_ID: (id: string) => `/api/Address/${id}`,
   GET_USER_ADDRESSES: (userId: string) => `/api/Address?userId=${userId}`,
   CREATE: '/api/Address',
-  UPDATE: '/api/Address',
+  UPDATE: (id: string) => `/api/Address/${id}`,
   DELETE: (id: string) => `/api/Address/${id}`,
   
   // Address management with pagination
@@ -79,26 +79,26 @@ export const ADDRESS_ENDPOINTS = {
 export const ORDER_ENDPOINTS = {
   // Order CRUD operations
   GET_ALL: '/api/Orders',
-  GET_BY_ID: (id: number) => `/api/Orders/${id}`,
+  GET_BY_ID: (id: string) => `/api/Orders/${id}`,
   CREATE: '/api/Orders',
-  UPDATE: (id: number) => `/api/Orders/${id}`,
-  DELETE: (id: number) => `/api/Orders/${id}`,
+  UPDATE: (id: string) => `/api/Orders/${id}`,
+  DELETE: (id: string) => `/api/Orders/${id}`,
   
   // Order management
   GET_USER_ORDERS: (userId: string) => `/api/Orders/user/${userId}`,
-  UPDATE_STATUS: (id: number) => `/api/Orders/${id}/status`,
-  CANCEL_ORDER: (id: number) => `/api/Orders/${id}/cancel`,
+  UPDATE_STATUS: (id: string) => `/api/Orders/${id}/status`,
+  CANCEL_ORDER: (id: string) => `/api/Orders/${id}/cancel`,
   
   // Order items
-  GET_ORDER_ITEMS: (orderId: number) => `/api/Orders/${orderId}/items`,
+  GET_ORDER_ITEMS: (orderId: string) => `/api/Orders/${orderId}/items`,
 } as const;
 
 // ===== USER PROFILE ENDPOINTS =====
 export const USER_ENDPOINTS = {
   // Profile management
-  GET_PROFILE: (userId: string) => `/api/UserProfiles/${userId}`,
+  GET_PROFILE: '/api/UserProfiles',
   GET_BY_ID: (id: string) => `/api/UserProfiles/${id}`,
-  UPDATE_PROFILE: (userId: string) => `/api/UserProfiles/${userId}`,
+  UPDATE_PROFILE: '/api/UserProfiles',
   DELETE_PROFILE: (id: string) => `/api/UserProfiles/${id}`,
   
   // User authentication status
@@ -138,15 +138,15 @@ export const ADMIN_USER_ENDPOINTS = {
   
   // Regular user profiles (non-admin)
   GET_CUSTOMER_PROFILES: '/api/UserProfiles',
-  UPDATE_CUSTOMER: (id: number) => `/api/UserProfiles/${id}`,
-  DELETE_CUSTOMER: (id: number) => `/api/UserProfiles/${id}`,
+  UPDATE_CUSTOMER: (id: string) => `/api/UserProfiles/${id}`,
+  DELETE_CUSTOMER: (id: string) => `/api/UserProfiles/${id}`,
 } as const;
 
 // ===== ADMIN ORDER MANAGEMENT ENDPOINTS =====
 export const ADMIN_ORDER_ENDPOINTS = {
   GET_ALL_ORDERS: '/api/Orders',
-  GET_ORDER_BY_ID: (id: number) => `/api/Orders/${id}`,
-  UPDATE_ORDER_STATUS: (id: number) => `/api/Orders/${id}/status`,
+  GET_ORDER_BY_ID: (id: string) => `/api/Orders/${id}`,
+  UPDATE_ORDER_STATUS: (id: string) => `/api/Orders/${id}/status`,
   GET_ORDER_STATISTICS: '/api/Orders/statistics',
   GET_ORDERS_BY_STATUS: (statusId: number) => `/api/Orders/status/${statusId}`,
 } as const;
@@ -271,7 +271,7 @@ export const buildEndpointWithParams = (
   const queryParams = new URLSearchParams();
   
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
+    if (value !== undefined && value !== null && value !== '') {
       queryParams.append(key, value.toString());
     }
   });

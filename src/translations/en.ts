@@ -88,7 +88,6 @@ const en = {
   'Delivery Address': 'Delivery Address',
   'Payment Method': 'Payment Method',
   'Order Status': 'Order Status',
-  'Processing': 'Processing',
   'Delivered': 'Delivered',
   'Cancelled': 'Cancelled',
   'Enter the product name': 'Enter the product name',
@@ -120,10 +119,10 @@ const en = {
   'Refresh': 'Refresh',
   
   // Admin screens
-  'Pending Orders': 'Pending Orders',
+  'Processing Orders': 'Processing Orders',
   'New Orders': 'New Orders',
   'All': 'All',
-  'Pending': 'Pending',
+  'Processing': 'Processing',
   'New': 'New',
   'No orders found': 'No orders found',
   'Orders placed by customers will appear here': 'Orders placed by customers will appear here',

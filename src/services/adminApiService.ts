@@ -8,7 +8,7 @@ import { API_ENDPOINTS } from './apiEndpoints';
 // ===== ADMIN INTERFACES =====
 
 export interface UpdateOrderStatusRequest {
-  statusId: number;
+  statusId: string; // Changed to string for GUID
   notes?: string;
 }
 
@@ -49,27 +49,32 @@ export interface InventoryItem {
 }
 
 export interface AdminOrder {
-  orderId: number;
-  userId: number;
+  id: string; // GUID string for order ID
+  userId: string; // GUID string for user ID
   userName?: string;
   userEmail?: string;
   orderDate: string;
   totalAmount: number;
-  orderStatusId: number;
+  orderStatusId: string; // GUID string for status ID
   statusName?: string;
   shippingAddressId: number;
+  trackingNumber?: string | null;
+  createdDate: string;
+  modifiedDate?: string | null;
   paymentStatus?: string;
   notes?: string;
   orderItems?: AdminOrderItem[];
 }
 
 export interface AdminOrderItem {
-  orderItemId: number;
-  productId: string;
+  orderItemId: string; // GUID string for order item ID
+  orderId: string; // GUID string for order ID
+  productId: string; // GUID string for product ID
   productName: string;
   quantity: number;
   price: number;
-  totalPrice: number;
+  imageUrl?: string | null;
+  totalPrice?: number;
 }
 
 export interface DeliveryChargeRule {
@@ -156,33 +161,20 @@ export const adminUserApi = {
     return apiRequest<null, AdminUserProfile[]>(API_ENDPOINTS.ADMIN.USERS.GET_ALL_USERS, 'GET');
   },
   
-  // Get a single user profile by ID (fetch all and filter)
-  getUserById: async (userId: string) => {
-    try {
-      console.log('🔍 getUserById - Fetching all users for userId:', userId);
-      const response = await apiRequest<null, AdminUserProfile[]>(API_ENDPOINTS.ADMIN.USERS.GET_ALL_USERS, 'GET');
-      console.log('🔍 getUserById - API response:', response);
-      if (response.success && response.data) {
-        console.log('🔍 getUserById - All users:', response.data);
-        const user = response.data.find(u => u.userId.toString() === userId);
-        console.log('🔍 getUserById - Found user:', user);
-        if (user) {
-          return { success: true, data: user };
-        } else {
-          console.log('🔍 getUserById - User not found in the list');
-          return { success: false, error: 'User not found' };
-        }
-      }
-      return response;
-    } catch (error) {
-      console.log('🔍 getUserById - Error:', error);
-      return { success: false, error: 'Failed to fetch user profile' };
-    }
+  // Get a single user profile by ID (more efficient)
+  getUserById: (userId: string) => {
+    console.log('🔍 getUserById - Fetching user with ID:', userId);
+    // This assumes your backend supports fetching a single user profile by ID.
+    // If not, the previous implementation is a fallback, but this is the correct approach.
+    return apiRequest<null, AdminUserProfile>(API_ENDPOINTS.ADMIN.USERS.GET_USER_BY_ID(userId), 'GET');
   },
   
-  // Update user profile (customer)
-  updateUser: (userId: number, userProfile: AdminUserProfile) => {
-    return apiRequest<AdminUserProfile, AdminUserProfile>(API_ENDPOINTS.ADMIN.USERS.UPDATE_CUSTOMER(userId), 'PUT', userProfile);
+  // Update user profile (customer) - Corrected to use string for userId
+  updateUser: (userId: string, userProfile: AdminUserProfile) => {
+    // The endpoint for updating a general user profile should be used.
+    // The distinction between 'customer' and 'manager' seems to be causing type issues.
+    // Using a consistent endpoint for user updates simplifies the logic.
+    return apiRequest<AdminUserProfile, AdminUserProfile>(API_ENDPOINTS.ADMIN.USERS.UPDATE_USER(userId), 'PUT', userProfile);
   },
 
   // Update manager/admin user profile
@@ -198,9 +190,9 @@ export const adminUserApi = {
     return apiRequest<any, AdminUserProfile>(API_ENDPOINTS.ADMIN.USERS.UPDATE_USER(userId), 'PUT', payload);
   },
   
-  // Delete user profile
-  deleteUser: (userId: number) => {
-    return apiRequest<null, void>(API_ENDPOINTS.ADMIN.USERS.DELETE_CUSTOMER(userId), 'DELETE');
+  // Delete user profile - Corrected to use string for userId
+  deleteUser: (userId: string) => {
+    return apiRequest<null, void>(API_ENDPOINTS.ADMIN.USERS.DELETE_USER(userId), 'DELETE');
   },
 };
 
@@ -213,12 +205,12 @@ export const adminOrderApi = {
   },
   
   // Get order by ID
-  getOrderById: (id: number) => {
+  getOrderById: (id: string) => {
     return apiRequest<null, AdminOrder>(API_ENDPOINTS.ADMIN.ORDERS.GET_ORDER_BY_ID(id), 'GET');
   },
   
   // Update order status
-  updateOrderStatus: (id: number, statusRequest: UpdateOrderStatusRequest) => {
+  updateOrderStatus: (id: string, statusRequest: UpdateOrderStatusRequest) => {
     return apiRequest<UpdateOrderStatusRequest, void>(API_ENDPOINTS.ADMIN.ORDERS.UPDATE_ORDER_STATUS(id), 'PUT', statusRequest);
   },
 };

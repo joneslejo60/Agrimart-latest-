@@ -3,6 +3,7 @@
 
 import { adminApi } from './adminApiService';
 import { ApiResponse } from './apiConfig';
+import { ORDER_STATUS } from '../constants/orderStatus';
 
 // ===== PRODUCT UTILITIES =====
 
@@ -65,6 +66,7 @@ export const getProductStats = async (): Promise<ProductStats> => {
 export interface OrderStats {
   totalOrders: number;
   pendingOrders: number;
+  processingOrders: number;
   completedOrders: number;
   cancelledOrders: number;
   totalRevenue: number;
@@ -78,6 +80,7 @@ export const getOrderStats = async (): Promise<OrderStats> => {
     return {
       totalOrders: 0,
       pendingOrders: 0,
+      processingOrders: 0,
       completedOrders: 0,
       cancelledOrders: 0,
       totalRevenue: 0,
@@ -88,29 +91,63 @@ export const getOrderStats = async (): Promise<OrderStats> => {
   const stats: OrderStats = {
     totalOrders: orders.data.length,
     pendingOrders: 0,
+    processingOrders: 0,
     completedOrders: 0,
     cancelledOrders: 0,
     totalRevenue: 0,
     averageOrderValue: 0,
   };
 
-  orders.data.forEach(order => {
-    // Status analysis (assuming status IDs: 1=pending, 2=completed, 3=cancelled)
-    switch (order.orderStatusId) {
-      case 1:
+  // Import OrderStatusStorage for local status updates
+  const { OrderStatusStorage } = await import('../utils/orderStatusStorage');
+
+  // Process each order and consider effective status (local overrides + API status)
+  for (const order of orders.data) {
+    const effectiveStatus = await OrderStatusStorage.getEffectiveOrderStatus(order);
+    
+    // Status analysis using effective status (considering local updates)
+    switch (effectiveStatus.toLowerCase()) {
+      case 'pending':
+      case 'new':
+      case 'confirmed':
         stats.pendingOrders++;
         break;
-      case 2:
+      case 'processing':
+        stats.processingOrders++;
+        break;
+      case 'delivered':
+      case 'shipped':
         stats.completedOrders++;
         break;
-      case 3:
+      case 'cancelled':
+      case 'refunded':
         stats.cancelledOrders++;
+        break;
+      default:
+        // If we can't determine status, check original API status
+        switch (order.orderStatusId) {
+          case ORDER_STATUS.PENDING:
+          case ORDER_STATUS.NEW:
+            stats.pendingOrders++;
+            break;
+          case ORDER_STATUS.PROCESSING:
+            stats.processingOrders++;
+            break;
+          case ORDER_STATUS.DELIVERED:
+          case ORDER_STATUS.SHIPPED:
+            stats.completedOrders++;
+            break;
+          case ORDER_STATUS.CANCELLED:
+          case ORDER_STATUS.REFUNDED:
+            stats.cancelledOrders++;
+            break;
+        }
         break;
     }
 
     // Revenue calculation
     stats.totalRevenue += order.totalAmount;
-  });
+  }
 
   // Calculate average order value
   if (stats.totalOrders > 0) {
@@ -310,7 +347,7 @@ export const bulkUpdateOrderStatus = async (orderIds: number[], statusId: number
   try {
     const results = await Promise.all(
       orderIds.map(id => 
-        adminApi.orders.updateOrderStatus(id, { statusId, notes })
+        adminApi.orders.updateOrderStatus(String(id), { statusId: String(statusId), notes })
       )
     );
 
@@ -362,11 +399,11 @@ export const exportOrdersToCSV = async (): Promise<string> => {
 
   const headers = ['Order ID', 'User ID', 'Date', 'Total', 'Status', 'Payment Status'];
   const rows = orders.data.map(order => [
-    order.orderId.toString(),
-    order.userId.toString(),
+    order.id?.toString() || '', // Use 'id' or the correct identifier property
+    order.userId?.toString() || '',
     order.orderDate,
-    order.totalAmount.toString(),
-    order.statusName || order.orderStatusId.toString(),
+    order.totalAmount?.toString() || '',
+    order.statusName || order.orderStatusId?.toString() || '',
     order.paymentStatus || 'N/A',
   ]);
 

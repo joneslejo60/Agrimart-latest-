@@ -361,8 +361,8 @@ export const addressApi = {
     }
     
     // Make a direct API call with no retries
-    return fetch(`${API_BASE_URL}${API_ENDPOINTS.ADDRESSES.UPDATE}`, {
-      method: 'POST',
+    return fetch(`${API_BASE_URL}${API_ENDPOINTS.ADDRESSES.UPDATE(id)}`, {
+      method: 'PUT',
       headers: headers,
       body: JSON.stringify(addressWithId)
     })
@@ -467,10 +467,13 @@ export const notificationsApi = {
 // ===== ORDER ENDPOINTS =====
 
 export interface OrderItem {
-  productId: string;  // Make this required
-  quantity: number;
-  price: number;
-  name: string;      // Make this required
+  orderItemId?: string;     // Optional - backend will generate
+  orderId?: string;         // Optional - backend will generate
+  productId: string;        // Required
+  quantity: number;         // Required
+  price: number;            // Required
+  productName: string;      // Required - renamed from 'name' to match API
+  imageUrl?: string;        // Optional - for product image
 }
 
 export interface OrderCreationResponse {
@@ -479,11 +482,16 @@ export interface OrderCreationResponse {
 }
 
 export interface Order {
-  userId: string;
-  shippingAddressId: string;
-  totalAmount: number;
-  orderStatusId: string;
-  orderItems: OrderItem[];  // Make this required
+  id?: string;                    // Optional - backend generates
+  userId: string;                 // Required
+  shippingAddressId: number;      // Changed to number to match API
+  orderDate?: string;             // Optional - backend can generate
+  totalAmount: number;            // Required
+  orderStatusId: string;          // Required
+  trackingNumber?: string;        // Optional - backend can generate
+  createdDate?: string;           // Optional - backend generates
+  modifiedDate?: string;          // Optional - backend generates
+  orderItems: OrderItem[];        // Required
 }
 
 export const orderApi = {
@@ -500,24 +508,21 @@ export const orderApi = {
     console.log('Creating order with data:', JSON.stringify(orderData));
     
     // Basic validation
-    if (!orderData.userId || !orderData.shippingAddressId) {
+    if (!orderData.userId || !orderData.shippingAddressId || !orderData.orderItems?.length) {
       console.error('Missing required fields in order data');
       return Promise.resolve({
         success: false,
-        error: 'Missing required user ID or shipping address',
+        error: 'Missing required user ID, shipping address, or order items',
         _isLocalFallback: false
       } as ApiResponse<OrderCreationResponse>);
     }
     
-    // Let's try a completely different approach based on the API error
-    
-    // First, ensure all product IDs are valid GUIDs
+    // Prepare order items matching the new API structure
     const convertedOrderItems = orderData.orderItems.map(item => {
       // Check if the productId is already a valid GUID
       const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.productId);
       
       // If not a valid GUID, generate a deterministic GUID based on the product ID
-      // This ensures the same non-GUID ID always maps to the same GUID
       const productId = isValidGuid 
         ? item.productId 
         : `00000000-0000-0000-0000-${item.productId.replace(/\D/g, '').padStart(12, '0').slice(-12)}`;
@@ -525,29 +530,32 @@ export const orderApi = {
       return {
         productId,
         quantity: item.quantity,
-        price: Number(item.price.toFixed(2))
+        price: Number(item.price.toFixed(2)),
+        productName: item.productName || 'Product',
+        imageUrl: (typeof item.imageUrl === 'string' && item.imageUrl.length > 0) ? item.imageUrl : undefined
       };
     });
     
-    // Try a simpler approach - just send the order data directly
-    // This is the most common API structure
-    const simplifiedOrder = {
+    // Create order object matching the new API structure
+    const apiOrderData = {
       userId: orderData.userId,
-      shippingAddressId: orderData.shippingAddressId,
+      shippingAddressId: Number(orderData.shippingAddressId), // Ensure it's a number
+      orderDate: orderData.orderDate || new Date().toISOString(),
       totalAmount: Number(orderData.totalAmount.toFixed(2)),
       orderStatusId: orderData.orderStatusId,
+      trackingNumber: orderData.trackingNumber || `TRK-${Date.now()}`,
       orderItems: convertedOrderItems
     };
     
-    console.log('Sending simplified order data:', JSON.stringify(simplifiedOrder));
+    // The API expects a flat order object, not one nested under an "order" key.
+    console.log('Sending API request payload:', JSON.stringify(apiOrderData));
     
-    // Try with the simplified data
-    const response = await apiRequest<typeof simplifiedOrder, OrderCreationResponse>('/api/Orders', 'POST', simplifiedOrder);
+    // Send to API with the correct flat order data structure
+    const response = await apiRequest<typeof apiOrderData, OrderCreationResponse>('/api/Orders', 'POST', apiOrderData);
     
     // If that fails, try with a special fallback for testing
     if (!response.success) {
-      console.log('First attempt failed, trying fallback approach');
-      
+      console.log('Order creation failed, trying fallback approach');
       // Create a fallback response to allow testing to continue
       return {
         success: true,
@@ -620,12 +628,16 @@ export interface Product {
 }
 
 export const productsApi = {
-  getAll: (p0: number, p1: number) => {
-    return apiRequest<null, Product[]>('/api/Products', 'GET');
+  getAll: (pageNumber: number = 1, pageSize: number = 50) => {
+    return apiRequest<null, Product[]>(`/api/Products?pageNumber=${pageNumber}&pageSize=${pageSize}`, 'GET');
   },
   
   getById: (id: number) => {
     return apiRequest<null, Product>(`/api/Products/${id}`, 'GET');
+  },
+  
+  getByCategory: (categoryId: number, pageNumber: number = 1, pageSize: number = 50) => {
+    return apiRequest<null, Product[]>(API_ENDPOINTS.PRODUCTS.BY_CATEGORY(categoryId) + `?pageNumber=${pageNumber}&pageSize=${pageSize}`, 'GET');
   },
 };
 
@@ -645,66 +657,37 @@ export const userProfileApi = {
   },
   
   create: (userProfile: CreateUserProfileRequest) => {
-    return apiRequest<CreateUserProfileRequest, any>('/api/UserProfiles', 'POST', userProfile);
+    // Transform the request to match server expectations - send properties at root level
+    const requestBody = {
+      name: userProfile.name,
+      email: userProfile.email,
+      phoneNumber: userProfile.phoneNumber,
+      profilePicture: userProfile.profilePicture,
+      // Convert password to passwordHash for server compatibility
+      passwordHash: userProfile.password,
+      // Add required role field (default to 'User' if not specified)
+      role: 'User'
+    };
+    
+    return apiRequest<any, any>('/api/UserProfiles', 'POST', requestBody);
   },
   
-  update: async (userId: string, userProfile: CreateUserProfileRequest) => {
-    try {
-      // First, get the current user profile to preserve existing data
-      console.log('Fetching current profile for userId:', userId);
-      const currentProfileResponse = await apiRequest<null, any>(API_ENDPOINTS.USERS.GET_BY_ID(userId), 'GET');
-      
-      let fullProfile;
-      if (currentProfileResponse.success && currentProfileResponse.data) {
-        // Update existing profile with new data
-        fullProfile = {
-          ...currentProfileResponse.data,
-          // Update only the fields that are provided
-          name: userProfile.name,
-          email: userProfile.email,
-          phoneNumber: userProfile.phoneNumber,
-          // Convert password to passwordHash if password is provided and not the placeholder
-          ...(userProfile.password && userProfile.password !== 'UNCHANGED_PASSWORD' 
-            ? { passwordHash: userProfile.password }
-            : {}),
-          // Include profile picture if provided
-          ...(userProfile.profilePicture !== undefined 
-            ? { profilePicture: userProfile.profilePicture }
-            : {}),
-          // Ensure userId is set
-          userId: userId
-        };
-      } else {
-        // If we can't get current profile, create a minimal complete profile
-        console.warn('Could not fetch current profile, creating minimal profile');
-        fullProfile = {
-          userId: userId,
-          name: userProfile.name,
-          email: userProfile.email,
-          phoneNumber: userProfile.phoneNumber,
-          passwordHash: userProfile.password !== 'UNCHANGED_PASSWORD' ? userProfile.password : '',
-          role: 'Customer', // Default role
-          isActive: true, // Default to active
-          createdDate: new Date().toISOString(),
-          lastLogin: new Date().toISOString(),
-          ...(userProfile.profilePicture !== undefined 
-            ? { profilePicture: userProfile.profilePicture }
-            : {})
-        };
-      }
-      
-      console.log('Sending complete profile to API:', fullProfile);
-      
-      // Use PUT method with userId in URL path as per API specification
-      return apiRequest<any, any>(API_ENDPOINTS.USERS.UPDATE_PROFILE(userId), 'PUT', fullProfile);
-    } catch (error) {
-      console.error('Error in profile update:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to update profile',
-        data: null
-      };
-    }
+  update: (userId: string, userProfile: CreateUserProfileRequest) => {
+    // Use PUT to /api/UserProfiles/{userId} as per API specification
+    // Transform the request to match server expectations - send properties at root level
+    const requestBody = {
+      name: userProfile.name,
+      email: userProfile.email,
+      phoneNumber: userProfile.phoneNumber,
+      profilePicture: userProfile.profilePicture,
+      // Convert password to passwordHash for server compatibility
+      passwordHash: userProfile.password,
+      // Add required role field (default to 'User' if not specified)
+      role: 'User',
+      userId: userId
+    };
+    
+    return apiRequest<any, any>(`/api/UserProfiles/${userId}`, 'PUT', requestBody);
   },
   getCurrent: async (token: string) => {
     // Manually set the Authorization header and use fetch
@@ -731,7 +714,7 @@ export const userProfileApi = {
 // ===== ADMIN/MANAGER ENDPOINTS =====
 
 export interface UpdateOrderStatusRequest {
-  statusId: number;
+  statusId: string; // Changed to string for GUID
   notes?: string;
 }
 
@@ -810,11 +793,11 @@ export const managerApi = {
     return apiRequest<null, Order[]>('/api/Orders', 'GET');
   },
   
-  getOrderById: (id: number) => {
+  getOrderById: (id: string) => {
     return apiRequest<null, Order>(`/api/Orders/${id}`, 'GET');
   },
   
-  updateOrderStatus: (id: number, statusRequest: UpdateOrderStatusRequest) => {
+  updateOrderStatus: (id: string, statusRequest: UpdateOrderStatusRequest) => {
     return apiRequest<UpdateOrderStatusRequest, void>(`/api/Orders/${id}/status`, 'PUT', statusRequest);
   },
 };

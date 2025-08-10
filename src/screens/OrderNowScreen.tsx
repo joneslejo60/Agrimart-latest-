@@ -24,6 +24,7 @@ import { getUser, fetchCurrentUserFromApi } from '../services/userService';
 import { saveCartItems } from '../utils/cartStorage';
 import { getStoredOrderItems, saveOrderItems, clearOrderItems, StoredOrderItem } from '../utils/orderItemsStorage';
 import { saveOrder, Order } from '../utils/orderStorage';
+import { ORDER_STATUS } from '../constants/orderStatus';
 
 type OrderNowScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'OrderNow'>;
 type OrderNowScreenRouteProp = RouteProp<RootStackParamList, 'OrderNow'>;
@@ -315,17 +316,20 @@ const OrderNowScreen = () => {
         return;
       }
       
-      // Create the order object with proper types
+      // Create the order object with proper types matching new API structure
       const orderData = {
         userId: userId, // Use the real user ID
-        shippingAddressId: shippingAddressId,
+        shippingAddressId: Number(shippingAddressId), // Convert to number as required by API
         totalAmount: parseFloat(totalAmount.toFixed(2)),
-        orderStatusId: "00000000-0000-0000-0000-000000000001", // Default status ID
+        orderStatusId: ORDER_STATUS.NEW, // New order status
+        orderDate: new Date().toISOString(),
+        trackingNumber: `TRK-${Date.now()}`,
         orderItems: validItems.map(item => ({
           productId: item.productId || item.id, // Use productId if available, otherwise use the item id
           quantity: parseFloat(item.quantity),
           price: item.price || 0,
-          name: item.productName
+          productName: item.productName, // Changed from 'name' to 'productName'
+          imageUrl: undefined // Manual orders don't have images
         }))
       };
       

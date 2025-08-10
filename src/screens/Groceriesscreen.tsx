@@ -23,6 +23,7 @@ import { getCartItems, saveCartItems, CartItem as CartItemType } from '../utils/
 import { cartApi, AddToCartRequest, CartItemUpdateDto,productsApi } from '../services/apiService';
 import userService from '../services/userService';
 import { useLanguage } from '../context/LanguageContext';
+import { useCart } from '../context/CartContext';
 
 type GroceriesScreenRouteProp = RouteProp<RootStackParamList, 'GroceriesScreen'>;
 type GroceriesScreenNavigationProp = CompositeNavigationProp<
@@ -49,25 +50,23 @@ const itemWidth = (screenWidth - 45) / 2; // 45 = padding + gap
 
 const GroceriesScreen = () => {
   const { translate } = useLanguage();
+  const { cartItems, addItem, updateQuantity, removeItem } = useCart();
   const route = useRoute<GroceriesScreenRouteProp>();
   const navigation = useNavigation<GroceriesScreenNavigationProp>();
   const { userName = '', userPhone = '' } = route.params || {};
   
   const [searchText, setSearchText] = useState('');
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Load cart items and products from storage when component mounts or when screen comes into focus
+  // Load products when component mounts or when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       const loadData = async () => {
         setIsLoading(true);
         try {
-          const storedCartItems = await getCartItems();
           const productItems = await getProducts();
           setProducts(productItems);
-          setCartItems(storedCartItems);
         } catch (error) {
           console.error('Error loading data:', error);
         } finally {
@@ -81,17 +80,71 @@ const GroceriesScreen = () => {
   
   const getProducts = async (): Promise<Product[]> => {
     try {
-      console.log('Fetching products using productsApi');
+      console.log('Fetching Groceries products using local filtering (skipping category endpoint)');
       
-      // Use the productsApi to get products
-      const response = await productsApi.getAll(1,50); // Get up to 50 products
+      // Get all products and filter locally (category endpoint not implemented in backend)
+      const response = await productsApi.getAll(1, 50);
       
       if (!response.success || !response.data) {
-        console.error('API did not return successful response:', response.error);
+        console.error('API call failed, using fallback products');
         return getFallbackProducts();
       }
       
-      const data = response.data;
+      // Filter products locally for category 3 (Groceries)
+      const allProducts = response.data;
+      console.log(`Fetched ${allProducts.length} total products, filtering for categoryId: 3`);
+      
+      // Debug: Log the structure of first few products to understand data format
+      if (allProducts.length > 0) {
+        console.log('🔍 DEBUG - Sample product structure (Groceries):');
+        console.log('Product 1:', JSON.stringify(allProducts[0], null, 2));
+        if (allProducts.length > 1) {
+          console.log('Product 2:', JSON.stringify(allProducts[1], null, 2));
+        }
+        
+        // Log all unique categoryId values to see what's available
+        const categoryIds = [...new Set(allProducts.map((p: any) => p.categoryId))];
+        console.log('🔍 Available categoryIds:', categoryIds);
+      }
+      
+      const filteredData = allProducts.filter((product: any) => {
+        const matchesCategoryId = product.categoryId === 3;
+        const matchesNestedCategory = product.category && product.category.id === 3;
+        const matchesGroceryKeywords = product.name && (
+          product.name.toLowerCase().includes('rice') ||
+          product.name.toLowerCase().includes('wheat') ||
+          product.name.toLowerCase().includes('flour') ||
+          product.name.toLowerCase().includes('oil') ||
+          product.name.toLowerCase().includes('milk') ||
+          product.name.toLowerCase().includes('tomato') ||
+          product.name.toLowerCase().includes('onion') ||
+          product.name.toLowerCase().includes('vegetable') ||
+          product.name.toLowerCase().includes('fruit') ||
+          product.name.toLowerCase().includes('grocer')
+        );
+        
+        // Debug each product's filtering (only log first 5 to avoid spam)
+        const productIndex = allProducts.indexOf(product);
+        if (productIndex < 5) {
+          console.log(`🔍 Product "${product.name}": categoryId=${product.categoryId}, matches=${matchesCategoryId || matchesNestedCategory || matchesGroceryKeywords}`);
+        }
+        
+        const matches = matchesCategoryId || matchesNestedCategory || matchesGroceryKeywords;
+        if (matches) {
+          console.log(`✅ Found Grocery product: ${product.name} (categoryId: ${product.categoryId})`);
+        }
+        return matches;
+      });
+      
+      console.log(`Found ${filteredData.length} Groceries products after local filtering`);
+      
+      // If no products found after filtering, return fallback products
+      if (filteredData.length === 0) {
+        console.log('No products found after filtering, using fallback products');
+        return getFallbackProducts();
+      }
+      
+      const data = filteredData;
       console.log('Groceries API Response:', JSON.stringify(data).substring(0, 200)); // Log first part of response
       
       if (!Array.isArray(data)) {
@@ -102,12 +155,23 @@ const GroceriesScreen = () => {
       // Map the data to our product format
       const mappedProducts = data.map((item: any) => {
         console.log('Groceries processing item image:', item.imageUrl || item.image); // Log each image URL
+        
+        // Get the image URL (check both imageUrl and image fields)
+        const imageUrlToCheck = item.imageUrl || item.image;
+        
+        // Validate if imageUrl is a real URL (not just placeholder text like "string")
+        const isValidImageUrl = imageUrlToCheck && 
+          imageUrlToCheck !== 'string' && 
+          imageUrlToCheck !== 'null' && 
+          imageUrlToCheck !== 'undefined' &&
+          (imageUrlToCheck.startsWith('http://') || imageUrlToCheck.startsWith('https://') || imageUrlToCheck.startsWith('/'));
+        
         return {
           id: item.id || item.productId || `product-${Math.random().toString(36).substring(2, 9)}`,
           name: item.name || 'Product',
           price: item.price || 0,
           // Handle image URL or fallback to a default image
-          image: (item.imageUrl || item.image) ? { uri: item.imageUrl || item.image } : require('../../assets/logo.png'),
+          image: isValidImageUrl ? { uri: imageUrlToCheck } : require('../../assets/logo.png'),
           description: item.description || '',
           productId: item.id // Map backend ID to productId
         };
@@ -185,185 +249,77 @@ const GroceriesScreen = () => {
   );
 
   const getCartItemQuantity = (productId: string): number => {
-    const item = cartItems.find(item => (item as CartItem).productId === productId);
+    const item = cartItems.find(item => item.id === productId);
     return item ? item.quantity : 0;
   };
 
-  // In addToCart, always use product.productId for API
   const addToCart = async (product: Product) => {
     try {
-      // Get current cart items from storage
-      const currentCart = await getCartItems();
-      // Add source property to identify as groceries
-      const productWithSource = { ...product, source: 'groceries' as const };
-      // Check if item exists
-      const existingItem = currentCart.find(item => (item as CartItem).productId === (product.productId || product.id));
-      // Make sure we have a valid product ID
       const productIdForApi = product.productId || product.id;
       if (!productIdForApi || productIdForApi === '00000000-0000-0000-0000-000000000000') {
         console.error('Groceries - Invalid product ID, cannot add to cart');
         return;
       }
-      // Log product details to debug
-      console.log('Groceries - Product being added:', {
+
+      // Create cart item with proper structure
+      const cartItem: CartItemType = {
         id: productIdForApi,
         name: product.name,
         price: product.price,
-        exists: !!existingItem
-      });
-      let updatedCart: CartItem[];
-      let response;
-      if (existingItem) {
-        // Calculate new quantity
-        const newQuantity = existingItem.quantity + 1;
-        // Update quantity of existing item in local cart
-        updatedCart = currentCart.map(item =>
-          (item as CartItem).productId === productIdForApi
-            ? { ...item, quantity: newQuantity }
-            : item
-        );
-        // Use smart cart operation for existing items
-        console.log('Groceries - Updating existing item:', {
-          productId: productIdForApi,
-          quantity: newQuantity
-        });
-        try {
-          response = await cartApi.smartCartOperation(productIdForApi, newQuantity, false);
-        } catch (apiError) {
-          console.log('✅ Backend cart unavailable, local cart working perfectly:', apiError instanceof Error ? apiError.message : 'Unknown error');
-          response = { success: false, error: 'Using local storage (recommended mode)' };
-        }
-      } else {
-        // Add new item to local cart
-        updatedCart = [...currentCart, { ...productWithSource, quantity: 1, productId: productIdForApi }];
-        // Use smart cart operation for new items
-        console.log('Groceries - Adding new item:', {
-          productId: productIdForApi,
-          quantity: 1
-        });
-        try {
-          response = await cartApi.smartCartOperation(productIdForApi, 1, true);
-        } catch (apiError) {
-          console.log('✅ Backend cart unavailable, local cart working perfectly:', apiError instanceof Error ? apiError.message : 'Unknown error');
-          response = { success: false, error: 'Using local storage (recommended mode)' };
-        }
-      }
-      // Save updated cart to storage
-      await saveCartItems(updatedCart);
-      // Update local state for UI
-      setCartItems(updatedCart);
-      // Handle API response (graceful degradation)
-      if (response) {
-        if (!response.success) {
-          console.log('✅ Local cart updated successfully - backend sync skipped');
-          console.log('🛒 Cart working perfectly in offline mode');
-        } else {
-          console.log('✅ Cart operation successful with backend sync');
-        }
-      } else {
-        console.log('✅ Local cart updated successfully - backend unavailable');
-        console.log('🛒 Cart working perfectly in offline mode');
+     image: product.image,
+        description: product.description,
+        quantity: 1,
+        source: 'groceries'
+      };
+
+      // Add to cart using context
+      addItem(cartItem);
+
+      // Also try to sync with API
+         try {
+        await cartApi.smartCartOperation(productIdForApi, 1, true);
+        console.log('Groceries - Successfully synced with API');
+      } catch (apiError) {
+        console.log('Groceries - API sync failed, but item added locally:', apiError);
       }
     } catch (error) {
-      console.error('Error adding to cart:', error instanceof Error ? error.message : 'Unknown error');
-      // Continue with local cart updates despite API errors
-      console.log('Continuing with local cart update despite API error');
+      console.error('Error adding to cart:', error);
     }
   };
 
-  // In removeFromCart, always use productId for API
   const removeFromCart = async (productId: string) => {
     try {
-      // Get current cart items from storage
-      const currentCart = await getCartItems();
-      // Find the item
-      const existingItem = currentCart.find(item => (item as CartItem).productId === productId);
+      const existingItem = cartItems.find(item => item.id === productId);
       if (!existingItem) {
         console.error('Item not found in cart');
         return;
       }
-      let updatedCart: CartItem[];
-      let response;
-      // Check if we need to decrease quantity or remove completely
+
       if (existingItem.quantity > 1) {
-        // Decrease quantity
-        const newQuantity = existingItem.quantity - 1;
-        updatedCart = currentCart.map(item =>
-          (item as CartItem).productId === productId
-            ? { ...item, quantity: newQuantity }
-            : item
-        );
-        // Use smart cart operation to decrease quantity
-        if (productId && productId !== '00000000-0000-0000-0000-000000000000') {
-          try {
-            console.log('Groceries - Decreasing quantity:', {
-              productId,
-              quantity: newQuantity
-            });
-            try {
-              response = await cartApi.smartCartOperation(productId, newQuantity, false);
-            } catch (apiError) {
-              console.log('✅ Backend cart unavailable, local cart working perfectly:', apiError instanceof Error ? apiError.message : 'Unknown error');
-              response = { success: false, error: 'Using local storage (recommended mode)' };
-            }
-            
-            if (response) {
-              if (!response.success) {
-                console.log('✅ Quantity updated successfully - backend sync skipped');
-              } else {
-                console.log('✅ Quantity updated successfully with backend sync');
-              }
-            } else {
-              console.log('✅ Quantity updated locally - backend unavailable');
-            }
-          } catch (apiError) {
-            console.log('✅ Quantity updated locally - backend cart unavailable:', apiError instanceof Error ? apiError.message : 'Unknown error');
-          }
+        // Decrease quantity by 1
+        updateQuantity(productId, existingItem.quantity - 1);
+        
+        // Try to sync with API
+        try {
+          await cartApi.smartCartOperation(productId, existingItem.quantity - 1, false);
+          console.log('Groceries - Successfully updated quantity via API');
+        } catch (apiError) {
+          console.log('Groceries - API sync failed, but quantity updated locally:', apiError);
         }
       } else {
         // Remove item completely
-        updatedCart = currentCart.filter(item => (item as CartItem).productId !== productId);
-        // Remove item completely using DELETE endpoint or quantity=0
-        if (productId && productId !== '00000000-0000-0000-0000-000000000000') {
-          try {
-            console.log('Groceries - Removing item completely:', productId);
-            try {
-              // Try DELETE endpoint first (most appropriate for complete removal)
-              response = await cartApi.deleteItem(productId);
-              console.log('Successfully removed item using DELETE endpoint');
-            } catch (deleteError) {
-              console.log('DELETE failed (expected if item not in backend), trying PUT with quantity=0 fallback');
-              try {
-                // Fallback to PUT with quantity=0
-                response = await cartApi.smartCartOperation(productId, 0, false);
-                console.log('Successfully removed item using PUT quantity=0 fallback');
-              } catch (putError) {
-                console.log('✅ Backend cart unavailable - item removed locally');
-                response = { success: false, error: 'Using local storage (recommended mode)' };
-              }
-            }
-            
-            if (response) {
-              if (!response.success) {
-                console.log('✅ Item removed successfully - backend sync skipped');
-              } else {
-                console.log('✅ Item removed successfully with backend sync');
-              }
-            } else {
-              console.log('✅ Item removed locally - backend unavailable');
-            }
-          } catch (apiError) {
-            console.log('✅ Item removed locally - backend cart unavailable:', apiError instanceof Error ? apiError.message : 'Unknown error');
-          }
+        removeItem(productId);
+        
+        // Try to sync with API
+        try {
+          await cartApi.deleteItem(productId);
+          console.log('Groceries - Successfully removed item via API');
+        } catch (apiError) {
+          console.log('Groceries - API sync failed, but item removed locally:', apiError);
         }
       }
-      // Save to storage
-      await saveCartItems(updatedCart);
-      // Update UI
-      setCartItems(updatedCart);
     } catch (error) {
-      console.error('Error removing from cart:', error instanceof Error ? error.message : 'Unknown error');
-      console.log('Continuing with local cart update despite error');
+      console.error('Error removing from cart:', error);
     }
   };
 

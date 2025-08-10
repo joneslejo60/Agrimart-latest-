@@ -20,7 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/navigation.types';
 import * as ImagePicker from 'react-native-image-picker';
 import apiService from '../services/apiService';
-import { getUser, fetchCurrentUserFromApi, getAuthToken } from '../services/userService';
+import { getUser, fetchCurrentUserFromApi, getAuthToken, saveUser } from '../services/userService';
 import { useLanguage } from '../context/LanguageContext';
 
 
@@ -225,8 +225,9 @@ const EditProfileScreen = () => {
       console.log('Saving user data with profile picture:', profileImage);
       console.log('Updated user data:', updatedUserData);
       
-      // Save to local storage
-      // await userService.saveUser(updatedUserData); // Removed userService
+      // Save to local storage FIRST - this ensures immediate UI updates
+      await saveUser(updatedUserData);
+      console.log('✅ User data saved to local storage');
       
       // Try to update via API
       try {
@@ -264,7 +265,8 @@ const EditProfileScreen = () => {
                 console.log('Updating profile image from API response:', apiResponse.data.profilePicture);
                 setProfileImage(apiResponse.data.profilePicture);
                 updatedUserData.profilePicture = apiResponse.data.profilePicture;
-                // await userService.saveUser(updatedUserData); // Removed userService
+                await saveUser(updatedUserData);
+                console.log('✅ User data updated with API profile picture');
               }
             } catch (createError) {
               console.error('Failed to create user profile in API:', createError);
@@ -282,7 +284,8 @@ const EditProfileScreen = () => {
                 console.log('Updating profile image from API update response:', apiResponse.data.profilePicture);
                 setProfileImage(apiResponse.data.profilePicture);
                 updatedUserData.profilePicture = apiResponse.data.profilePicture;
-                // await userService.saveUser(updatedUserData); // Removed userService
+                await saveUser(updatedUserData);
+                console.log('✅ User data updated with API update response');
               }
             } catch (updateError) {
               console.error('Failed to update user profile in API:', updateError);
@@ -300,7 +303,8 @@ const EditProfileScreen = () => {
             console.log('Updating profile image from API create response:', apiResponse.data.profilePicture);
             setProfileImage(apiResponse.data.profilePicture);
             updatedUserData.profilePicture = apiResponse.data.profilePicture;
-            // await userService.saveUser(updatedUserData); // Removed userService
+            await saveUser(updatedUserData);
+            console.log('✅ User data updated with API create response');
           }
         }
         

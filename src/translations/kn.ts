@@ -145,6 +145,12 @@ const kn = {
   'Product saved successfully!': 'ಉತ್ಪನ್ನವನ್ನು ಯಶಸ್ವಿಯಾಗಿ ಉಳಿಸಲಾಗಿದೆ!',
   'Please fill in all required fields': 'ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ಕ್ಷೇತ್ರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ',
   'Are you sure you want to logout?': 'ನೀವು ಖಚಿತವಾಗಿ ಲಾಗ್ ಔಟ್ ಆಗಲು ಬಯಸುತ್ತೀರಾ?',
+  'Processing Orders': 'ಆರ್ಡರ್‌ಗಳನ್ನು',
+  'Admin Home': 'ನಿರ್ವಾಹಕ ಮನೆ',
+  'Admin Orders': 'ನಿರ್ವಾಹಕ ಆದೇಶಗಳು',
+  'Admin Inventory': 'ನಿರ್ವಾಹಕ ಸಂಗ್ರಹ',
+  'Admin Profile': 'ನಿರ್ವಾಹಕ ಪ್ರೊಫೈಲ್',
+  'Admin Dashboard': 'ನಿರ್ವಾಹಕ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್',
 };
 
 export default kn;
