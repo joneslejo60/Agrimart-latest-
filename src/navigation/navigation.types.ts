@@ -3,7 +3,14 @@ export type RootStackParamList = {
   Splash: undefined;                                    
   Onboarding: undefined;                               //  Feature introduction - standalone experience
   Login: { role?: 'admin' | 'customer' };              //  Phone number entry - fresh start, with optional role
-  Otp: { phoneNumber: string; role?: 'admin' | 'customer' };                        // SMS verification - needs the phone number and role
+  Otp: { 
+    phoneNumber: string; 
+    role?: 'admin' | 'customer';
+    userId?: string;
+    userRole?: string;
+    userName?: string;
+    fromLogin?: boolean;
+  };                        // SMS verification - needs the phone number and role
   EnterName: { phoneNumber: string; userType?: 'customer' | 'manager' };                  //Personal greeting setup - carries phone number
   HomeTabs: { userName: string; userPhone: string; profileImage?: string; screen?: keyof HomeTabsParamList; params?: any };   //Main app hub - personalized with user data
   AdminTabs: { userName: string; userPhone: string; profileImage?: string; designation?: string; screen?: keyof AdminTabsParamList; params?: any }; // Admin app hub - personalized with admin data

@@ -27,7 +27,6 @@ const LoginScreen = () => {
   const { translate } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [usePassword, setUsePassword] = useState(false);
   const navigation = useNavigation<LoginNavProp>();
 
   const handleLogin = async () => {
@@ -121,28 +120,18 @@ const LoginScreen = () => {
         value={email}
         onChangeText={setEmail}
       />
-      {usePassword && (
-        <TextInput
-          style={styles.input}
-          placeholder="Enter password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-      )}
-      <TouchableOpacity
-        style={styles.toggleButton}
-        onPress={() => setUsePassword((prev) => !prev)}
-      >
-        <Text style={styles.toggleButtonText}>
-          {usePassword ? 'Login with OTP instead' : 'Login with Password instead'}
-        </Text>
-      </TouchableOpacity>
+      <TextInput
+        style={styles.input}
+        placeholder="Enter password"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+      />
       <TouchableOpacity
         style={styles.button}
-        onPress={usePassword ? handleLogin : handleOtp}
+        onPress={handleLogin}
       >
-        <Text style={styles.buttonText}>{usePassword ? 'Login' : 'Send OTP'}</Text>
+        <Text style={styles.buttonText}>Login</Text>
       </TouchableOpacity>
     </View>
   );
@@ -172,15 +161,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: 'bold',
     fontFamily: 'Montserrat',
-  },
-  toggleButton: {
-    marginVertical: 10,
-    alignSelf: 'center',
-  },
-  toggleButtonText: {
-    color: '#007bff',
-    fontSize: 15,
-    fontFamily: 'Montserrat',
-    textDecorationLine: 'underline',
   },
 });
